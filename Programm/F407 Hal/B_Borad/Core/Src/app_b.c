@@ -32,7 +32,7 @@
 
 /* Communication */
 #define COMM_INTERVAL_TICK  50      /* Send packet every 50 ms */
-#define COMM_TIMEOUT_MS     1000
+#define COMM_TIMEOUT_MS     800
 
 /* K2 button debounce */
 #define DEBOUNCE_MS         30
@@ -66,6 +66,8 @@ static volatile uint32_t sys_tick = 0;
 /* Communication */
 static uint8_t tx_seq = 0;
 static uint8_t comm_first_rx = 0;
+static uint8_t last_a_seq = 0;   /* 记录收到的A板seq，回传给A板确认 */
+static uint8_t a_confirmed_seq = 0;  /* A板确认的B板seq */
 
 /* K2 button */
 static uint32_t k2_last_press_tick = 0;
@@ -211,7 +213,7 @@ static void UpdateD2(void)
  * ================================================================ */
 static void Comm_Send(void)
 {
-    uint8_t buf[4];
+    uint8_t buf[5];
     uint8_t flags = 0;
 
     if (g_state.d2_enabled)  flags |= 0x01;
@@ -220,9 +222,10 @@ static void Comm_Send(void)
     buf[0] = 0xBB;
     buf[1] = tx_seq++;
     buf[2] = flags;
-    buf[3] = buf[0] ^ buf[1] ^ buf[2];
+    buf[3] = last_a_seq;   /* 告诉A板：我最后收到你的seq是多少 */
+    buf[4] = buf[0] ^ buf[1] ^ buf[2] ^ buf[3];
 
-    HAL_UART_Transmit(&huart1, buf, 4, 10);
+    HAL_UART_Transmit(&huart1, buf, 5, 10);
 }
 
 /* ================================================================
@@ -233,7 +236,7 @@ static void Comm_Send(void)
 void AppB_UART_RxCplt(uint8_t byte)
 {
     static uint8_t  st  = 0;
-    static uint8_t  buf[5];
+    static uint8_t  buf[6];
     static uint8_t  pos = 0;
 
     if (byte == 0xAA) {
@@ -244,17 +247,19 @@ void AppB_UART_RxCplt(uint8_t byte)
 
     if (st == 1) {
         buf[pos++] = byte;
-        if (pos >= 5) {
-            /* Verify checksum */
+        if (pos >= 6) {
+            /* Verify checksum: XOR of all bytes except checksum */
             uint8_t chk = 0xAA;
-            for (uint8_t i = 0; i < 4; i++) chk ^= buf[i];
-            if (chk == buf[4]) {
-                /* seq=buf[0], flags=buf[1], vi=(buf[2]<<8)|buf[3] */
+            for (uint8_t i = 0; i < 5; i++) chk ^= buf[i];
+            if (chk == buf[5]) {
+                /* seq=buf[0], flags=buf[1], vi=(buf[2]<<8)|buf[3], last_b_seq=buf[4] */
                 uint8_t flags   = buf[1];
                 uint16_t vi_mv  = ((uint16_t)buf[2] << 8) | buf[3];
                 float    vi_new = (float)vi_mv / 1000.0f;
 
-                comm_first_rx = 1;
+                comm_first_rx     = 1;
+                last_a_seq        = buf[0];  /* 记录A板seq，下次发包带回 */
+                a_confirmed_seq   = buf[4];  /* A板确认的B板seq */
 
                 /* Toggle D2 on K1 long press from A board */
                 if (flags & 0x01) {
@@ -287,8 +292,16 @@ static void Comm_CheckTimeout(void)
     if (!comm_first_rx && HAL_GetTick() < 3000) {
         return;
     }
+    /* 超时判断：超过1秒没收到对方包 */
     if (HAL_GetTick() - g_state.last_rx_tick > COMM_TIMEOUT_MS) {
         g_state.comm_state = COMM_LOST;
+    }
+    /* seq差值判断：只有建立过通信后才检查，避免上电时误判 */
+    if (comm_first_rx) {
+        int8_t seq_diff = (int8_t)(tx_seq - a_confirmed_seq);
+        if (seq_diff > 15) {
+            g_state.comm_state = COMM_LOST;
+        }
     }
 }
 
@@ -432,6 +445,7 @@ void AppB_Init(void)
     g_state.comm_state   = COMM_OK;
     g_state.pwm_mode     = PWM_MODE_FOLLOW;
     g_state.pwm_duty     = TIM1_DUTY_INIT;
+    g_state.vi_voltage   = 1.65f;      /* 初始Vi=1.65V，跟随模式算出50%占空比 */
     g_state.last_rx_tick = HAL_GetTick();
 
     /* --- Start TIM1 complementary PWM (CH1 + CH1N) at 50% ------ */

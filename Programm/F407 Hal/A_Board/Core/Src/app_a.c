@@ -42,7 +42,7 @@
  
 /* Communication */
 #define COMM_INTERVAL_TICK  50      /* Send packet every 50 ms (50 × 1 kHz) */
-#define COMM_TIMEOUT_MS     1000
+#define COMM_TIMEOUT_MS     800
  
 /* Button K1 (PA2) */
 #define LONG_PRESS_MS       800
@@ -91,6 +91,7 @@ static volatile uint32_t sys_tick = 0;
 /* Communication */
 static uint8_t tx_seq = 0;
 static uint8_t comm_first_rx = 0;    /* set after first valid B packet */
+static uint8_t last_b_seq = 0;       /* 记录收到的B板seq，回传给B板确认 */
  
 /* Button state machine (runs entirely in TIM3 ISR @ 1kHz) */
 typedef enum {
@@ -268,13 +269,14 @@ static void Signal_Analyze(void)
 /* ================================================================
  * Communication: send packet A→B (called every 50 ms from ISR)
  *
- * Packet (6 bytes):
- *   [0xAA] [seq] [flags] [vi_h] [vi_l] [xor-checksum]
- *   flags: bit0 = toggle D2 request
+ * Packet (7 bytes):
+ *   [0xAA] [seq] [flags] [vi_h] [vi_l] [last_b_seq] [xor-checksum]
+ *   flags:       bit0 = toggle D2 request, bit1 = D1 status
+ *   last_b_seq:  A板确认收到的B板seq（B板用这个判断A板是否收到自己的包）
  * ================================================================ */
 static void Comm_Send(void)
 {
-    uint8_t  buf[6];
+    uint8_t  buf[7];
     uint16_t vi_mv = (uint16_t)(g_state.vi_instant * 1000.0f + 0.5f);
     uint8_t  flags = 0;
  
@@ -298,26 +300,31 @@ static void Comm_Send(void)
     buf[2] = flags;
     buf[3] = (uint8_t)(vi_mv >> 8);
     buf[4] = (uint8_t)(vi_mv & 0xFF);
-    buf[5] = buf[0] ^ buf[1] ^ buf[2] ^ buf[3] ^ buf[4];
+    buf[5] = last_b_seq;   /* 告诉B板：我最后收到你的seq是多少 */
+    buf[6] = buf[0] ^ buf[1] ^ buf[2] ^ buf[3] ^ buf[4] ^ buf[5];
  
-    HAL_UART_Transmit(&huart1, buf, 6, 10);
+    HAL_UART_Transmit(&huart1, buf, 7, 10);
 }
  
 /* ================================================================
  * Communication: process received byte from B→A
  *
- * B→A packet (4 bytes):
- *   [0xBB] [seq] [flags] [xor-checksum]
- *   seq:   递增序列号（防 checksum 与同步字碰撞）
- *   flags: bit0 = D2 state, bit1-2 = PWM mode
+ * B→A packet (5 bytes):
+ *   [0xBB] [seq] [flags] [confirmed_seq] [xor-checksum]
+ *   seq:           递增序列号（防 checksum 与同步字碰撞）
+ *   flags:         bit0 = D2 state, bit1-2 = PWM mode
+ *   confirmed_seq: B板确认收到的A板seq（用于A板判断B板是否收到自己的包）
  *
  * Called from HAL_UART_RxCpltCallback (interrupt context).
  * ================================================================ */
+static uint8_t b_confirmed_seq = 0;  /* B板确认的A板seq */
+
 void AppA_UART_RxCplt(uint8_t byte)
 {
-    static uint8_t  st  = 0;    /* 0=sync, 1=seq, 2=flags, 3=chk */
+    static uint8_t  st  = 0;    /* 0=sync, 1=seq, 2=flags, 3=conf_seq, 4=chk */
     static uint8_t  seq = 0;
     static uint8_t  flg = 0;
+    static uint8_t  csq = 0;
 
     if (byte == 0xBB) {
         st = 1;
@@ -337,9 +344,17 @@ void AppA_UART_RxCplt(uint8_t byte)
     }
 
     if (st == 3) {
-        /* Verify: XOR of 0xBB, seq, flags must equal checksum */
-        if ((uint8_t)(0xBB ^ seq ^ flg) == byte) {
+        csq = byte;
+        st  = 4;
+        return;
+    }
+
+    if (st == 4) {
+        /* Verify: XOR of 0xBB, seq, flags, confirmed_seq must equal checksum */
+        if ((uint8_t)(0xBB ^ seq ^ flg ^ csq) == byte) {
             comm_first_rx       = 1;
+            b_confirmed_seq     = csq;
+            last_b_seq          = seq;  /* 记录B板seq，下次发包带回 */
             g_state.d2_enabled  =  flg & 0x01;
             g_state.pwm_mode    = (PWMMode_t)((flg >> 1) & 0x03);
             g_state.last_rx_tick = HAL_GetTick();
@@ -366,8 +381,16 @@ static void Comm_CheckTimeout(void)
     if (!comm_first_rx && HAL_GetTick() < 3000) {
         return;
     }
+    /* 超时判断：超过1秒没收到对方包 */
     if (HAL_GetTick() - g_state.last_rx_tick > COMM_TIMEOUT_MS) {
         g_state.comm_state = COMM_LOST;
+    }
+    /* seq差值判断：只有建立过通信后才检查，避免上电时误判 */
+    if (comm_first_rx) {
+        int8_t seq_diff = (int8_t)(tx_seq - b_confirmed_seq);
+        if (seq_diff > 15) {
+            g_state.comm_state = COMM_LOST;
+        }
     }
 }
  
@@ -647,6 +670,7 @@ void AppA_Init(void)
 {
     /* Zero out state ---------------------------------------------- */
     memset(&g_state, 0, sizeof(g_state));
+    g_state.vi_instant   = 1.65f;      /* 初始Vi=1.65V，防止发0给B板导致PWM=10% */
     g_state.comm_state   = COMM_OK;
     g_state.pwm_mode     = PWM_MODE_FOLLOW;
     g_state.last_rx_tick = HAL_GetTick();
