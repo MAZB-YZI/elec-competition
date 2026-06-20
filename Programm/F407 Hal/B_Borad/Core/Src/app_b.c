@@ -204,22 +204,25 @@ static void UpdateD2(void)
 
 /* ================================================================
  * Communication: send packet B→A
- * Packet: [0xBB] [flags] [checksum]
+ * Packet: [0xBB] [seq] [flags] [checksum]
+ *   seq:   每次发送递增，防止 FOLLOW+D2off 时 flags=0x00 导致
+ *          checksum 固定等于 0xBB（与同步字碰撞）
  *   flags: bit0 = D2 state, bit1-2 = PWM mode
  * ================================================================ */
 static void Comm_Send(void)
 {
-    uint8_t buf[3];
+    uint8_t buf[4];
     uint8_t flags = 0;
 
     if (g_state.d2_enabled)  flags |= 0x01;
     flags |= (uint8_t)((g_state.pwm_mode & 0x03) << 1);
 
     buf[0] = 0xBB;
-    buf[1] = flags;
-    buf[2] = buf[0] ^ buf[1];
+    buf[1] = tx_seq++;
+    buf[2] = flags;
+    buf[3] = buf[0] ^ buf[1] ^ buf[2];
 
-    HAL_UART_Transmit(&huart1, buf, 3, 10);
+    HAL_UART_Transmit(&huart1, buf, 4, 10);
 }
 
 /* ================================================================
@@ -257,6 +260,9 @@ void AppB_UART_RxCplt(uint8_t byte)
                 if (flags & 0x01) {
                     g_state.d2_enabled = !g_state.d2_enabled;
                 }
+
+                /* D1 状态从 bit1 读取 */
+                g_state.d1_enabled = (flags >> 1) & 0x01;
 
                 /* Update Vi and add to history */
                 g_state.vi_voltage  = vi_new;
@@ -349,23 +355,7 @@ static void Display_Update(void)
     line[21] = '\0';
     SSD1306_DrawString(1, 0, line);
 
-    /* Line 2: D2 status + PWM duty */
-    memset(line, ' ', sizeof(line));
-    if (g_state.d2_enabled) {
-        memcpy(line, "D2:ON  ", 7);
-    } else {
-        memcpy(line, "D2:OFF ", 7);
-    }
-    {
-        int  pct = (int)(g_state.pwm_duty * 100.0f + 0.5f);
-        line[7] = 'P'; line[8] = ':';
-        if (pct >= 10) { line[9] = (char)('0' + pct / 10); line[10] = (char)('0' + pct % 10); line[11] = '%'; }
-        else           { line[9] = (char)('0' + pct);       line[10] = '%'; }
-    }
-    line[21] = '\0';
-    SSD1306_DrawString(2, 0, line);
-
-    /* Line 3: D1 status (A board remote) + PWM mode */
+    /* Line 2: D1 status (A board remote) + PWM mode */
     memset(line, ' ', sizeof(line));
     if (g_state.d1_enabled) {
         memcpy(line, "D1:ON  ", 7);
@@ -383,6 +373,22 @@ static void Display_Update(void)
         for (int i = 0; m[i]; i++) line[7 + i] = m[i];
     }
     line[21] = '\0';
+    SSD1306_DrawString(2, 0, line);
+
+    /* Line 3: D2 status + PWM duty */
+    memset(line, ' ', sizeof(line));
+    if (g_state.d2_enabled) {
+        memcpy(line, "D2:ON  ", 7);
+    } else {
+        memcpy(line, "D2:OFF ", 7);
+    }
+    {
+        int  pct = (int)(g_state.pwm_duty * 100.0f + 0.5f);
+        line[7] = 'P'; line[8] = ':';
+        if (pct >= 10) { line[9] = (char)('0' + pct / 10); line[10] = (char)('0' + pct % 10); line[11] = '%'; }
+        else           { line[9] = (char)('0' + pct);       line[10] = '%'; }
+    }
+    line[21] = '\0';
     SSD1306_DrawString(3, 0, line);
 
     /* Line 4: Communication status */
@@ -395,9 +401,24 @@ static void Display_Update(void)
     line[21] = '\0';
     SSD1306_DrawString(4, 0, line);
 
-    /* Line 5-6: Aux info */
-    SSD1306_DrawString(5, 0, "K2:Cycle Mode     ");
-    SSD1306_DrawString(6, 0, "PWM:5kHz CH1+CH1N ");
+    /* Line 5: PWM mode number (debug) */
+    {
+        char mline[22];
+        memset(mline, ' ', sizeof(mline));
+        memcpy(mline, "ModeNum:", 8);
+        mline[8] = (char)('0' + (uint8_t)g_state.pwm_mode);
+        mline[9] = ' ';
+        /* Also show raw duty % */
+        int pct2 = (int)(g_state.pwm_duty * 100.0f + 0.5f);
+        memcpy(mline + 10, "Duty:", 5);
+        if (pct2 >= 100) { mline[15]='1'; mline[16]=(char)('0'+(pct2/10)%10); mline[17]=(char)('0'+pct2%10); }
+        else if (pct2 >= 10) { mline[15]=(char)('0'+pct2/10); mline[16]=(char)('0'+pct2%10); }
+        else { mline[15]=(char)('0'+pct2); }
+        mline[21] = '\0';
+        SSD1306_DrawString(5, 0, mline);
+    }
+    /* Line 6: K2 hint */
+    SSD1306_DrawString(6, 0, "K2:Follow/Max/Min ");
 
     SSD1306_UpdateScreen();
 }

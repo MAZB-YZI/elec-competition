@@ -52,6 +52,11 @@
 #define BREATH_FREQ_MODE0   0.5f    /* 2 s cycle */
 #define BREATH_FREQ_MODE1   1.0f    /* 1 s cycle */
 #define BREATH_FREQ_MODE2   2.0f    /* 0.5 s cycle */
+
+/* Breathing mode display labels */
+#define BREATH_LABEL_SLOW   "Br:Slow"
+#define BREATH_LABEL_MID    "Br:Mid"
+#define BREATH_LABEL_FAST   "Br:Fast"
  
 /* Display refresh period (ms) */
 #define DISP_REFRESH_MS     300
@@ -98,7 +103,8 @@ typedef enum {
 static BtnState_t btn_state = BTN_IDLE;
 static uint32_t   btn_press_start = 0;   /* sys_tick when press confirmed */
 static uint8_t    btn_debounce = 0;       /* consecutive stable samples */
-static uint8_t    btn_long_sent = 0;      /* D2 toggle already sent this press */
+static uint8_t    btn_long_sent = 0;      /* D2 toggle flagged for Comm_Send */
+static uint8_t    btn_long_done = 0;      /* long-press fired this press cycle, prevent re-trigger */
  
 /* Display periodic-refresh timestamp */
 static uint32_t last_disp_ms = 0;
@@ -283,6 +289,9 @@ static void Comm_Send(void)
             d2_cmd_pending = 0;   /* normal send clears any pending too */
         }
     }
+
+    /* D1 状态放入 bit1，让 B 板 OLED 显示 */
+    if (g_state.d1_enabled) flags |= 0x02;
  
     buf[0] = 0xAA;
     buf[1] = tx_seq++;
@@ -297,41 +306,45 @@ static void Comm_Send(void)
 /* ================================================================
  * Communication: process received byte from B→A
  *
- * B→A packet (3 bytes):
- *   [0xBB] [flags] [xor-checksum]
+ * B→A packet (4 bytes):
+ *   [0xBB] [seq] [flags] [xor-checksum]
+ *   seq:   递增序列号（防 checksum 与同步字碰撞）
  *   flags: bit0 = D2 state, bit1-2 = PWM mode
  *
  * Called from HAL_UART_RxCpltCallback (interrupt context).
  * ================================================================ */
 void AppA_UART_RxCplt(uint8_t byte)
 {
-    static uint8_t  st  = 0;    /* 0=wait sync, 1=wait flags, 2=wait chk */
+    static uint8_t  st  = 0;    /* 0=sync, 1=seq, 2=flags, 3=chk */
+    static uint8_t  seq = 0;
     static uint8_t  flg = 0;
- 
+
     if (byte == 0xBB) {
-        st = 1;                 /* sync received, expect flags next */
+        st = 1;
         return;
     }
- 
+
     if (st == 1) {
-        flg = byte;
+        seq = byte;
         st  = 2;
         return;
     }
- 
+
     if (st == 2) {
-        /* Verify: XOR of 0xBB and flags must equal checksum */
-        if ((uint8_t)(0xBB ^ flg) == byte) {
+        flg = byte;
+        st  = 3;
+        return;
+    }
+
+    if (st == 3) {
+        /* Verify: XOR of 0xBB, seq, flags must equal checksum */
+        if ((uint8_t)(0xBB ^ seq ^ flg) == byte) {
             comm_first_rx       = 1;
             g_state.d2_enabled  =  flg & 0x01;
             g_state.pwm_mode    = (PWMMode_t)((flg >> 1) & 0x03);
             g_state.last_rx_tick = HAL_GetTick();
             if (g_state.comm_state == COMM_LOST) {
-                /* Re-connected — restore breathing phase smoothly */
                 g_state.comm_state = COMM_OK;
-                /* If K1 long-press was issued while link was down,
-                   fire it now so B board gets the D2 toggle command
-                   on the very next Comm_Send (within 50 ms). */
                 if (d2_cmd_pending) {
                     btn_long_sent  = 1;
                     d2_cmd_pending = 0;
@@ -340,7 +353,7 @@ void AppA_UART_RxCplt(uint8_t byte)
         }
         st = 0;
     } else {
-        st = 0;                 /* out of sync — silently drop */
+        st = 0;
     }
 }
  
@@ -427,6 +440,7 @@ static void Button_Tick(void)
             if (++btn_debounce >= DEBOUNCE_MS) {        /* 30 consecutive lows */
                 btn_state        = BTN_PRESSED;
                 btn_long_sent    = 0;
+                btn_long_done    = 0;
                 btn_debounce     = 0;
                 /* btn_press_start already set at first low */
             }
@@ -439,9 +453,10 @@ static void Button_Tick(void)
     {
         uint32_t held = sys_tick - btn_press_start;     /* includes debounce time */
  
-        /* Long-press action: fire once at threshold */
-        if (held >= LONG_PRESS_MS && !btn_long_sent) {
+        /* Long-press action: fire once per press cycle */
+        if (held >= LONG_PRESS_MS && !btn_long_done) {
             btn_long_sent = 1;          /* toggle D2 flag → sent by Comm_Send */
+            btn_long_done = 1;          /* prevent re-trigger until release */
         }
  
         if (raw == 1) {                                 /* pin high → maybe releasing */
@@ -560,9 +575,9 @@ static void Display_Update(void)
     {
         const char *mode_str = "Mode:?";
         switch (g_state.pwm_mode) {
-            case PWM_MODE_FOLLOW: mode_str = "Br:Slow"; break;
-            case PWM_MODE_MAX:    mode_str = "Br:Mid "; break;
-            case PWM_MODE_MIN:    mode_str = "Br:Fast"; break;
+            case PWM_MODE_FOLLOW: mode_str = BREATH_LABEL_SLOW; break;
+            case PWM_MODE_MAX:    mode_str = BREATH_LABEL_MID;  break;
+            case PWM_MODE_MIN:    mode_str = BREATH_LABEL_FAST; break;
         }
         for (int i = 0; mode_str[i]; i++) line[8 + i] = mode_str[i];
     }
