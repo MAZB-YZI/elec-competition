@@ -1,6 +1,7 @@
 # Large data files
 数据手册/
 training/
+astm/
 *.rar
 *.7z
 *.zip
