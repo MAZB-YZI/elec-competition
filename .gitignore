@@ -1,0 +1,35 @@
+# Large data files
+数据手册/
+training/
+*.rar
+*.7z
+*.zip
+*.mp4
+*.avi
+
+# Keil MDK build outputs
+*.o
+*.d
+*.axf
+*.htm
+*.hex
+*.map
+*.lst
+*.dep
+*.crf
+*.lnp
+*.sct
+*.tra
+*.build_log.htm
+JLinkLog.txt
+*.uvoptx
+
+# VS Code
+.vscode/
+*.log
+*.log.lock
+
+# OS
+Thumbs.db
+Desktop.ini
+~$*
