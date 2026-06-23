@@ -57,6 +57,16 @@ static const uint8_t Font6x8[][6] = {
     {0x08,0x04,0x08,0x10,0x08,0x00},
 };
 
+/* Recover a wedged I2C bus (noise/glitch on jumper wires can leave SDA
+   held low → all transfers time out and the OLED appears frozen).
+   Re-initialising the peripheral clears the BUSY/error state without a
+   manual board reset. */
+static void I2C_Recover(void)
+{
+    HAL_I2C_DeInit(&hi2c1);
+    HAL_I2C_Init(&hi2c1);
+}
+
 static int I2C_Write(uint8_t ctrl, const uint8_t *data, uint16_t len)
 {
     uint8_t buf[17];
@@ -67,7 +77,9 @@ static int I2C_Write(uint8_t ctrl, const uint8_t *data, uint16_t len)
         if (chunk > 16) chunk = 16;
         buf[0] = ctrl;
         memcpy(buf + 1, data + pos, chunk);
-        if (HAL_I2C_Master_Transmit(&hi2c1, SSD1306_ADDR, buf, chunk + 1, 100) != HAL_OK) {
+        if (HAL_I2C_Master_Transmit(&hi2c1, SSD1306_ADDR, buf, chunk + 1, 20) != HAL_OK) {
+            /* transfer failed — bus may be wedged; try to recover */
+            I2C_Recover();
             return -1;
         }
         pos += chunk;
@@ -115,8 +127,10 @@ void SSD1306_UpdateScreen(void)
 {
     for (uint8_t p = 0; p < SSD1306_PAGES; p++) {
         uint8_t cmds[] = {0xB0 | p, 0x00, 0x10};
-        I2C_Write(0x00, cmds, 3);
-        I2C_Write(0x40, &SSD1306_Buffer[p * SSD1306_WIDTH], SSD1306_WIDTH);
+        if (I2C_Write(0x00, cmds, 3) != 0) return;   /* bus wedged → bail,
+                                          recovered for next frame */
+        if (I2C_Write(0x40, &SSD1306_Buffer[p * SSD1306_WIDTH],
+                      SSD1306_WIDTH) != 0) return;
     }
 }
 

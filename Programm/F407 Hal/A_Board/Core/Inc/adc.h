@@ -41,7 +41,7 @@ extern ADC_HandleTypeDef hadc1;
 void MX_ADC1_Init(void);
 
 /* USER CODE BEGIN Prototypes */
-
+float ADC_MeasureVDDA(void);   /* measure true VDDA via internal VREFINT */
 /* USER CODE END Prototypes */
 
 #ifdef __cplusplus

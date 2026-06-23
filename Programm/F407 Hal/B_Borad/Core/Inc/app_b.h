@@ -22,7 +22,9 @@ typedef enum {
  * ================================================================ */
 typedef struct {
     /* --- Vi from A board via USART --- */
-    float    vi_voltage;       /* Latest Vi value (V) */
+    float    vi_voltage;       /* Latest instantaneous Vi (V) — follow mode + D2 */
+    float    vi_max;           /* 1 s peak Vi from A board (V) — MAX mode */
+    float    vi_min;           /* 1 s trough Vi from A board (V) — MIN mode */
 
     /* --- D2 LED (local, TIM2 CH1 on PA5) --- */
     uint8_t  d2_enabled;       /* 1 = on, 0 = off (controlled by K1 long press from A) */

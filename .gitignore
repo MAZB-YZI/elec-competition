@@ -34,3 +34,6 @@ JLinkLog.txt
 Thumbs.db
 Desktop.ini
 ~$*
+
+# Temp / extracted docs
+_docx_tmp/

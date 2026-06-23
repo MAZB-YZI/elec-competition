@@ -34,6 +34,8 @@ typedef struct {
     SignalType_t signal_type;    /* Detected signal type */
     float        voltage;        /* DC voltage or AC amplitude (V) */
     float        vi_instant;     /* Most recent instantaneous Vi (V) */
+    float        vi_max;         /* Max Vi over past 1 s (V) — for B board MAX mode */
+    float        vi_min;         /* Min Vi over past 1 s (V) — for B board MIN mode */
 
     /* --- D1 LED (local, PWM breathing on PA5) --- */
     uint8_t d1_enabled;          /* 1 = on (breathing), 0 = off */

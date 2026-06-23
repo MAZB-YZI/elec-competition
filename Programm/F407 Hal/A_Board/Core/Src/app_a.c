@@ -31,7 +31,7 @@
 /* ADC */
 #define ADC_DMA_BUF_SIZE    8
 #define SAMPLE_BUF_SIZE     2048    /* 2 s @ 1 kHz — ensures full 1-3Hz cycle */
-#define VREF                3.30f
+#define VREF_NOMINAL        3.30f   /* fallback if VREFINT calibration fails */
 #define ADC_MAX             4095.0f
  
 /* Signal detection thresholds (12-bit LSB) */
@@ -84,6 +84,15 @@ static uint16_t sample_buf[SAMPLE_BUF_SIZE];
 static volatile uint16_t sample_cnt = 0;
 static float    adc_ema = 0.0f;        /* EMA-filtered ADC value */
 static uint8_t  adc_ema_init = 0;      /* First-sample flag */
+
+/* True VDDA / VREF, measured at startup via internal VREFINT.
+   Replaces the fixed 3.30 V assumption so ADC voltages stay accurate
+   regardless of the actual supply level. */
+static float    g_vref = VREF_NOMINAL;
+
+/* Active floating-pin probe */
+static volatile uint8_t probe_busy = 0;  /* 1 → TIM3 ISR pauses sample collection */
+static uint8_t  probe_floating = 0;      /* 1 → PC0 is floating (no input) */
  
 /* System tick @ 1 kHz (incremented in TIM3 ISR) */
 static volatile uint32_t sys_tick = 0;
@@ -128,7 +137,7 @@ static int  FmtInt(char *buf, int val);
  * ================================================================ */
 static inline float ADCToV(uint16_t raw)
 {
-    return (float)raw * VREF / ADC_MAX;
+    return (float)raw * g_vref / ADC_MAX;
 }
  
 /* ================================================================
@@ -180,6 +189,59 @@ static int FmtInt(char *buf, int val)
 }
  
 /* ================================================================
+ * Active Floating-Pin Probe
+ *
+ * A floating ADC pin sits at a stable mid-low voltage (e.g. 0.27V)
+ * that is indistinguishable from a real low-impedance DC source by
+ * voltage alone.  This routine actively pulls the pin:
+ *
+ *   - Switch PC0 to DIGITAL input (analog mode disables PU/PD).
+ *   - Apply internal pull-UP, settle, read level.
+ *   - Apply internal pull-DOWN, settle, read level.
+ *   - A floating (high-Z) pin follows the pull → reads 1 then 0.
+ *   - A real source (low-Z) holds its level → reads stay equal.
+ *   - Restore analog mode and resume ADC.
+ *
+ * Returns 1 if floating (no input), 0 otherwise.
+ * Costs ~10 ms; only called from the 1 s analysis cycle.
+ * ================================================================ */
+static uint8_t Probe_Floating(void)
+{
+    GPIO_InitTypeDef gi = {0};
+    uint8_t lvl_up, lvl_dn;
+
+    probe_busy = 1;                 /* TIM3 ISR stops feeding sample_buf */
+    HAL_ADC_Stop_DMA(&hadc1);       /* release the pin from the ADC */
+
+    /* --- digital input, pull-up --- */
+    gi.Pin  = GPIO_PIN_0;
+    gi.Mode = GPIO_MODE_INPUT;
+    gi.Pull = GPIO_PULLUP;
+    gi.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOC, &gi);
+    HAL_Delay(5);                   /* settle (no external cap → 5 ms ample) */
+    lvl_up = (uint8_t)HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_0);
+
+    /* --- digital input, pull-down --- */
+    gi.Pull = GPIO_PULLDOWN;
+    HAL_GPIO_Init(GPIOC, &gi);
+    HAL_Delay(5);
+    lvl_dn = (uint8_t)HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_0);
+
+    /* --- restore analog mode --- */
+    gi.Mode = GPIO_MODE_ANALOG;
+    gi.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(GPIOC, &gi);
+
+    HAL_ADC_Start_DMA(&hadc1, (uint32_t *)adc_dma_buf, ADC_DMA_BUF_SIZE);
+    adc_ema_init = 0;               /* discard stale EMA, reseed on next sample */
+    probe_busy = 0;
+
+    /* Floating: level tracked both pulls (high on PU, low on PD). */
+    return (lvl_up == 1 && lvl_dn == 0) ? 1 : 0;
+}
+
+/* ================================================================
  * Signal Analysis: classify & measure Vi
  * Called from main loop when enough samples are available.
  * ================================================================ */
@@ -212,41 +274,34 @@ static void Signal_Analyze(void)
     uint16_t pp    = vmax - vmin;
     float  variance = (sum_sq / (float)cnt) - (avg_raw * avg_raw);
     float  std_dev  = (variance > 0.0f) ? sqrtf(variance) : 0.0f;
- 
+
     /* Store instantaneous value (use last filtered sample) */
     g_state.vi_instant = ADCToV(sample_buf[cnt - 1]);
- 
+
+    /* True peak / trough over this 1 s window — sent to B board for its
+       MAX / MIN PWM modes (1 kHz sampling captures peaks far better than
+       the 50 ms packet rate ever could). */
+    g_state.vi_max = ADCToV(vmax);
+    g_state.vi_min = ADCToV(vmin);
+
     /* --- Classification ---------------------------------------- */
- 
-    /* Floating / noisy pin detection:
-       A real DC source has low std_dev. A floating pin has
-       higher std_dev even if peak-to-peak is moderate. */
-    uint8_t noisy = (std_dev > NOISE_STD_THRESH) ? 1 : 0;
- 
-    /* No input: very low average AND (quiet or the pin is near 0V steady) */
-    if (avg_raw < (float)NOINPUT_AVG_LSB && !noisy) {
+
+    /* Probe FIRST, unconditionally.  A high-Z floating pin picks up noise
+       that makes std_dev/Vpp jump around (can spike above the DC window
+       and get misread as a square wave).  The active pull probe is immune
+       to that noise — if the pin follows the pulls it is floating, period.
+       Cost is ~10 ms once per 1 s cycle → negligible for real signals. */
+    probe_floating = Probe_Floating();
+    if (probe_floating) {
         g_state.signal_type = SIGNAL_NONE;
         g_state.voltage     = 0.0f;
+        g_state.vi_instant  = 0.0f;  /* B board: D2 micro-glow, PWM 50% */
+        g_state.vi_max      = 0.0f;
+        g_state.vi_min      = 0.0f;
         return;
     }
- 
-    /* Floating pin detected — treat as "no input" regardless of avg */
-    if (noisy && pp < (SIG_THRESH_LSB * 4)) {
-        /* High noise but small swing → probably floating */
-        g_state.signal_type = SIGNAL_NONE;
-        g_state.voltage     = 0.0f;
-        return;
-    }
- 
-    /* DC: low peak-to-peak and not too noisy */
-    if (pp < SIG_THRESH_LSB) {
-        g_state.signal_type = SIGNAL_DC;
-        g_state.voltage     = ADCToV((uint16_t)avg_raw);
-        if (g_state.voltage < 0.01f) g_state.voltage = 0.0f;
-        return;
-    }
- 
-    /* AC signal — derivative-based sine/square discrimination */
+
+    /* Derivative stats (needed for both DC discrimination and sine/square) */
     float sum_d = 0.0f, max_d = 0.0f;
     for (uint16_t i = 1; i < cnt; i++) {
         float d = (float)((int16_t)sample_buf[i] - (int16_t)sample_buf[i - 1]);
@@ -255,29 +310,53 @@ static void Signal_Analyze(void)
         if (d > max_d) max_d = d;
     }
     float avg_d = sum_d / (float)(cnt - 1);
- 
+
+    /* DC detection — robust against noisy supplies / ripple.
+       A true DC has BOTH a small swing AND a small average slope.
+       A square wave, even with flat tops, has big edges → high avg_d,
+       so requiring low avg_d stops noisy DC being misread as square.
+       std_dev (true RMS of the swing) is also small for DC. */
+    if (pp < SIG_THRESH_LSB || (avg_d < 2.0f && std_dev < (float)SIG_THRESH_LSB)) {
+        g_state.signal_type = SIGNAL_DC;
+        g_state.voltage     = ADCToV((uint16_t)avg_raw);
+        if (g_state.voltage < 0.01f) g_state.voltage = 0.0f;
+        /* DC: max = min = the steady value */
+        g_state.vi_max = g_state.voltage;
+        g_state.vi_min = g_state.voltage;
+        return;
+    }
+
+    /* AC signal — derivative-based sine/square discrimination */
     if (avg_d > 0.5f && (max_d / avg_d) > SQWAVE_RATIO) {
         g_state.signal_type = SIGNAL_SQUARE;
+        /* Square: flat tops give a clean Vpp; /2 is robust to duty ratio */
+        g_state.voltage = ADCToV((uint16_t)pp) / 2.0f;
     } else {
         g_state.signal_type = SIGNAL_SINE;
+        /* Sine amplitude = AC_RMS x sqrt(2). std_dev is the AC RMS over
+           all 1000 samples → noise averages out by sqrt(N), far more
+           accurate than single-sample min/max. */
+        g_state.voltage = (std_dev * 1.41421356f) * (g_vref / ADC_MAX);
     }
- 
-    /* Amplitude = Vpp / 2 */
-    g_state.voltage = ADCToV((uint16_t)pp) / 2.0f;
 }
  
 /* ================================================================
  * Communication: send packet A→B (called every 50 ms from ISR)
  *
- * Packet (7 bytes):
- *   [0xAA] [seq] [flags] [vi_h] [vi_l] [last_b_seq] [xor-checksum]
- *   flags:       bit0 = toggle D2 request, bit1 = D1 status
+ * Packet (11 bytes):
+ *   [0xAA] [seq] [flags] [vi_h] [vi_l] [max_h] [max_l] [min_h] [min_l]
+ *         [last_b_seq] [xor-checksum]
+ *   flags:       bit0 = toggle D2 request, bit1 = D1 status, bit2 = no-input
+ *   vi:          instantaneous Vi (mV) — follow mode + D2 brightness
+ *   max/min:     1 s peak/trough (mV) — B board MAX / MIN PWM modes
  *   last_b_seq:  A板确认收到的B板seq（B板用这个判断A板是否收到自己的包）
  * ================================================================ */
 static void Comm_Send(void)
 {
-    uint8_t  buf[7];
-    uint16_t vi_mv = (uint16_t)(g_state.vi_instant * 1000.0f + 0.5f);
+    uint8_t  buf[11];
+    uint16_t vi_mv  = (uint16_t)(g_state.vi_instant * 1000.0f + 0.5f);
+    uint16_t max_mv = (uint16_t)(g_state.vi_max * 1000.0f + 0.5f);
+    uint16_t min_mv = (uint16_t)(g_state.vi_min * 1000.0f + 0.5f);
     uint8_t  flags = 0;
  
     if (btn_long_sent) {
@@ -294,16 +373,24 @@ static void Comm_Send(void)
 
     /* D1 状态放入 bit1，让 B 板 OLED 显示 */
     if (g_state.d1_enabled) flags |= 0x02;
+
+    /* bit2: 无输入标志 → B 板把 PWM 强制 50%（D2 仍按 Vi=0 微光） */
+    if (g_state.signal_type == SIGNAL_NONE) flags |= 0x04;
  
     buf[0] = 0xAA;
     buf[1] = tx_seq++;
     buf[2] = flags;
     buf[3] = (uint8_t)(vi_mv >> 8);
     buf[4] = (uint8_t)(vi_mv & 0xFF);
-    buf[5] = last_b_seq;   /* 告诉B板：我最后收到你的seq是多少 */
-    buf[6] = buf[0] ^ buf[1] ^ buf[2] ^ buf[3] ^ buf[4] ^ buf[5];
- 
-    HAL_UART_Transmit(&huart1, buf, 7, 10);
+    buf[5] = (uint8_t)(max_mv >> 8);
+    buf[6] = (uint8_t)(max_mv & 0xFF);
+    buf[7] = (uint8_t)(min_mv >> 8);
+    buf[8] = (uint8_t)(min_mv & 0xFF);
+    buf[9] = last_b_seq;   /* 告诉B板：我最后收到你的seq是多少 */
+    buf[10] = buf[0] ^ buf[1] ^ buf[2] ^ buf[3] ^ buf[4]
+            ^ buf[5] ^ buf[6] ^ buf[7] ^ buf[8] ^ buf[9];
+
+    HAL_UART_Transmit(&huart1, buf, 11, 10);
 }
  
 /* ================================================================
@@ -526,14 +613,16 @@ void AppA_Tick1kHz(void)
     sys_tick++;
  
     /* --- collect ADC sample (with EMA low-pass filter) --------- */
-    {
+    if (!probe_busy) {
         uint16_t raw = adc_dma_buf[0];
         if (!adc_ema_init) {
             adc_ema = (float)raw;
             adc_ema_init = 1;
         } else {
-            /* EMA: 15% new + 85% old → ~20ms settling, strong noise rejection */
-            adc_ema = adc_ema * 0.85f + (float)raw * 0.15f;
+            /* EMA: 50% new + 50% old → light filtering. Keeps floating-pin
+               HF noise visible (so std_dev detects it) and minimizes peak
+               attenuation for accurate sine/square amplitude. */
+            adc_ema = adc_ema * 0.5f + (float)raw * 0.5f;
         }
         if (sample_cnt < SAMPLE_BUF_SIZE) {
             sample_buf[sample_cnt++] = (uint16_t)adc_ema;
@@ -565,36 +654,49 @@ static void Display_Update(void)
     /* --- Line 0: title ------------------------------------------- */
     SSD1306_DrawString(0, 0, "== A Board ==");
  
-    /* --- Line 1: signal type & voltage --------------------------- */
+    /* --- Line 1: signal type & measured voltage ----------------- */
     memset(line, ' ', sizeof(line));
     switch (g_state.signal_type) {
-        case SIGNAL_NONE:   memcpy(line, "Sig: None     ", 14); break;
-        case SIGNAL_DC:     memcpy(line, "Sig: DC  ", 9);  break;
-        case SIGNAL_SINE:   memcpy(line, "Sig: Sine ", 10); break;
-        case SIGNAL_SQUARE: memcpy(line, "Sig: Sq   ", 10); break;
+        case SIGNAL_NONE:   memcpy(line, "Sig:None ", 9); break;
+        case SIGNAL_DC:     memcpy(line, "Sig:DC   ", 9); break;
+        case SIGNAL_SINE:   memcpy(line, "Sig:Sine ", 9); break;
+        case SIGNAL_SQUARE: memcpy(line, "Sig:Sq   ", 9); break;
     }
-    /* Append voltage value after the label */
     {
-        char  vs[8];
-        int   pos = 8;  /* after "Sig: XX " */
+        char vs[8];
+        int  pos = 9;
         if (g_state.signal_type != SIGNAL_NONE) {
             FmtFloat(vs, g_state.voltage, 2);
-            vs[4] = 'V';
-            vs[5] = '\0';
             for (int i = 0; vs[i]; i++) line[pos++] = vs[i];
+            line[pos++] = 'V';
         }
         line[21] = '\0';
     }
     SSD1306_DrawString(1, 0, line);
- 
-    /* --- Line 2: D1 status + breathing note --------------------- */
+
+    /* --- Line 2: 1 s peak / trough (used by B board MAX/MIN) ----- */
+    memset(line, ' ', sizeof(line));
+    {
+        char vs[8];
+        memcpy(line, "Mx:", 3);
+        int pos = 3;
+        FmtFloat(vs, g_state.vi_max, 2);
+        for (int i = 0; vs[i]; i++) line[pos++] = vs[i];
+        line[pos++] = ' ';
+        memcpy(line + pos, "Mn:", 3); pos += 3;
+        FmtFloat(vs, g_state.vi_min, 2);
+        for (int i = 0; vs[i]; i++) line[pos++] = vs[i];
+        line[21] = '\0';
+    }
+    SSD1306_DrawString(2, 0, line);
+
+    /* --- Line 3: D1 status + breathing mode --------------------- */
     memset(line, ' ', sizeof(line));
     if (g_state.d1_enabled) {
         memcpy(line, "D1:ON  ", 7);
     } else {
         memcpy(line, "D1:OFF ", 7);
     }
-    /* Append breathing mode label */
     {
         const char *mode_str = "Mode:?";
         switch (g_state.pwm_mode) {
@@ -605,9 +707,9 @@ static void Display_Update(void)
         for (int i = 0; mode_str[i]; i++) line[8 + i] = mode_str[i];
     }
     line[21] = '\0';
-    SSD1306_DrawString(2, 0, line);
- 
-    /* --- Line 3: D2 status (remote B board) --------------------- */
+    SSD1306_DrawString(3, 0, line);
+
+    /* --- Line 4: D2 status (remote) + PWM mode ------------------ */
     memset(line, ' ', sizeof(line));
     memcpy(line, "D2:", 3);
     if (g_state.d2_enabled) {
@@ -615,7 +717,6 @@ static void Display_Update(void)
     } else {
         memcpy(line + 3, "OFF", 3);
     }
-    /* Append mode description */
     {
         const char *m = " Mode:Follow";
         if (g_state.pwm_mode == PWM_MODE_MAX) m = " Mode:Max   ";
@@ -623,43 +724,34 @@ static void Display_Update(void)
         for (int i = 0; m[i]; i++) line[7 + i] = m[i];
     }
     line[21] = '\0';
-    SSD1306_DrawString(3, 0, line);
- 
-    /* --- Line 4: Communication status --------------------------- */
+    SSD1306_DrawString(4, 0, line);
+
+    /* --- Line 5: Communication status --------------------------- */
     memset(line, ' ', sizeof(line));
     if (g_state.comm_state == COMM_OK) {
-        memcpy(line, "Comm: OK  ", 10);
+        memcpy(line, "Comm:OK  ", 9);
     } else {
-        memcpy(line, "Comm: LOST", 10);
+        memcpy(line, "Comm:LOST", 9);
     }
     line[21] = '\0';
-    SSD1306_DrawString(4, 0, line);
- 
-    /* --- Line 5: Raw ADC debug ----------------------------------- */
+    SSD1306_DrawString(5, 0, line);
+
+    /* --- Line 6: live ADC raw value + voltage ------------------- */
     memset(line, ' ', sizeof(line));
     {
         char tmp[8];
         memcpy(line, "ADC:", 4);
         int pos = 4;
-        FmtInt(tmp, (int)adc_ema);
+        FmtInt(tmp, (int)(adc_ema + 0.5f));
         for (int i = 0; tmp[i]; i++) line[pos++] = tmp[i];
         line[pos++] = ' ';
-        line[pos++] = '=';
-        line[pos++] = ' ';
-        FmtFloat(tmp, ADCToV((uint16_t)adc_ema), 2);
+        FmtFloat(tmp, ADCToV((uint16_t)(adc_ema + 0.5f)), 2);
         for (int i = 0; tmp[i]; i++) line[pos++] = tmp[i];
+        line[pos++] = 'V';
+        line[21] = '\0';
     }
-    line[21] = '\0';
-    SSD1306_DrawString(5, 0, line);
- 
-    /* --- Line 6: filtered sample buffer info --------------------- */
-    {
-        char num[5];
-        FmtInt(num, (int)sample_cnt);
-        SSD1306_DrawString(6, 0, "Buf:");
-        SSD1306_DrawString(6, 4, num);
-    }
- 
+    SSD1306_DrawString(6, 0, line);
+
     SSD1306_UpdateScreen();
 }
  
@@ -681,8 +773,11 @@ void AppA_Init(void)
     /* --- Start TIM3 timebase (1 kHz, CubeMX已配置PSC=83/ARR=999) --- */
     HAL_TIM_Base_Start_IT(&htim3);
  
-    /* --- Start ADC with DMA circular ---------------------------- */
+    /* --- Calibrate VREF via internal reference (before DMA loop) - */
     HAL_Delay(1);   /* let ADC stabilize after init */
+    g_vref = ADC_MeasureVDDA();   /* true VDDA, replaces fixed 3.30 V */
+
+    /* --- Start ADC with DMA circular ---------------------------- */
     HAL_ADC_Start_DMA(&hadc1, (uint32_t *)adc_dma_buf, ADC_DMA_BUF_SIZE);
  
     /* --- Start UART RX (byte-by-byte interrupt) ----------------- */

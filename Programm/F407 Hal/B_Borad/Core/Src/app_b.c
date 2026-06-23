@@ -37,9 +37,6 @@
 /* K2 button debounce */
 #define DEBOUNCE_MS         30
 
-/* Vi history for max/min tracking (1s = 20 samples at 50ms rate) */
-#define VI_HISTORY_SIZE     20
-
 /* Display refresh */
 #define DISP_REFRESH_MS     300
 
@@ -55,10 +52,6 @@ volatile uint8_t uart_rx_byte;
  * Private Variables
  * ================================================================ */
 
-/* Vi history ring buffer */
-static float   vi_history[VI_HISTORY_SIZE];
-static uint8_t vi_hist_idx = 0;
-static uint8_t vi_hist_full = 0;
 
 /* System tick */
 static volatile uint32_t sys_tick = 0;
@@ -68,6 +61,7 @@ static uint8_t tx_seq = 0;
 static uint8_t comm_first_rx = 0;
 static uint8_t last_a_seq = 0;   /* 记录收到的A板seq，回传给A板确认 */
 static uint8_t a_confirmed_seq = 0;  /* A板确认的B板seq */
+static uint8_t no_input = 0;     /* A板报告无输入：PWM强制50%，D2仍微光 */
 
 /* K2 button */
 static uint32_t k2_last_press_tick = 0;
@@ -105,46 +99,6 @@ static float ViToDuty(float vi, float dmin, float dmax)
     return dmin + (vi / 3.30f) * (dmax - dmin);
 }
 
-/* ================================================================
- * Add Vi sample to history ring buffer
- * ================================================================ */
-static void ViHistory_Add(float vi)
-{
-    vi_history[vi_hist_idx] = vi;
-    vi_hist_idx++;
-    if (vi_hist_idx >= VI_HISTORY_SIZE) {
-        vi_hist_idx = 0;
-        vi_hist_full = 1;
-    }
-}
-
-/* ================================================================
- * Get max Vi in history
- * ================================================================ */
-static float ViHistory_GetMax(void)
-{
-    uint8_t n = vi_hist_full ? VI_HISTORY_SIZE : vi_hist_idx;
-    if (n == 0) return 0.0f;
-    float m = vi_history[0];
-    for (uint8_t i = 1; i < n; i++) {
-        if (vi_history[i] > m) m = vi_history[i];
-    }
-    return m;
-}
-
-/* ================================================================
- * Get min Vi in history
- * ================================================================ */
-static float ViHistory_GetMin(void)
-{
-    uint8_t n = vi_hist_full ? VI_HISTORY_SIZE : vi_hist_idx;
-    if (n == 0) return 0.0f;
-    float m = vi_history[0];
-    for (uint8_t i = 1; i < n; i++) {
-        if (vi_history[i] < m) m = vi_history[i];
-    }
-    return m;
-}
 
 /* ================================================================
  * Update complementary PWM duty on TIM1 CH1/CH1N
@@ -156,6 +110,10 @@ static void UpdatePWM(void)
     if (g_state.comm_state == COMM_LOST) {
         /* Keep last duty — g_state.pwm_duty unchanged */
         duty = g_state.pwm_duty;
+    } else if (no_input) {
+        /* No input on A board → fixed 50% duty (spec #17) */
+        duty = 0.50f;
+        g_state.pwm_duty = duty;
     } else {
         switch (g_state.pwm_mode) {
             default:
@@ -163,10 +121,12 @@ static void UpdatePWM(void)
                 duty = ViToDuty(g_state.vi_voltage, TIM1_DUTY_MIN, TIM1_DUTY_MAX);
                 break;
             case PWM_MODE_MAX:
-                duty = ViToDuty(ViHistory_GetMax(), TIM1_DUTY_MIN, TIM1_DUTY_MAX);
+                /* 1 s peak, computed on A board (1 kHz sampling) */
+                duty = ViToDuty(g_state.vi_max, TIM1_DUTY_MIN, TIM1_DUTY_MAX);
                 break;
             case PWM_MODE_MIN:
-                duty = ViToDuty(ViHistory_GetMin(), TIM1_DUTY_MIN, TIM1_DUTY_MAX);
+                /* 1 s trough, computed on A board (1 kHz sampling) */
+                duty = ViToDuty(g_state.vi_min, TIM1_DUTY_MIN, TIM1_DUTY_MAX);
                 break;
         }
         g_state.pwm_duty = duty;
@@ -230,13 +190,17 @@ static void Comm_Send(void)
 
 /* ================================================================
  * Communication: process received byte from A→B
- * Packet: [0xAA] [seq] [flags] [vi_h] [vi_l] [checksum]
- *   flags: bit0 = toggle D2 request
+ * Packet (11 bytes):
+ *   [0xAA] [seq] [flags] [vi_h] [vi_l] [max_h] [max_l] [min_h] [min_l]
+ *         [last_b_seq] [checksum]
+ *   flags: bit0 = toggle D2, bit1 = D1 status, bit2 = no-input
+ *   vi:    instantaneous Vi (mV) — follow mode + D2
+ *   max/min: 1 s peak/trough (mV) — MAX / MIN PWM modes
  * ================================================================ */
 void AppB_UART_RxCplt(uint8_t byte)
 {
     static uint8_t  st  = 0;
-    static uint8_t  buf[6];
+    static uint8_t  buf[10];
     static uint8_t  pos = 0;
 
     if (byte == 0xAA) {
@@ -247,19 +211,21 @@ void AppB_UART_RxCplt(uint8_t byte)
 
     if (st == 1) {
         buf[pos++] = byte;
-        if (pos >= 6) {
-            /* Verify checksum: XOR of all bytes except checksum */
+        if (pos >= 10) {
+            /* Verify checksum: XOR of 0xAA + first 9 bytes == buf[9] */
             uint8_t chk = 0xAA;
-            for (uint8_t i = 0; i < 5; i++) chk ^= buf[i];
-            if (chk == buf[5]) {
-                /* seq=buf[0], flags=buf[1], vi=(buf[2]<<8)|buf[3], last_b_seq=buf[4] */
-                uint8_t flags   = buf[1];
+            for (uint8_t i = 0; i < 9; i++) chk ^= buf[i];
+            if (chk == buf[9]) {
+                /* seq=buf[0], flags=buf[1], vi=buf[2..3],
+                   max=buf[4..5], min=buf[6..7], last_b_seq=buf[8] */
+                uint8_t  flags  = buf[1];
                 uint16_t vi_mv  = ((uint16_t)buf[2] << 8) | buf[3];
-                float    vi_new = (float)vi_mv / 1000.0f;
+                uint16_t max_mv = ((uint16_t)buf[4] << 8) | buf[5];
+                uint16_t min_mv = ((uint16_t)buf[6] << 8) | buf[7];
 
                 comm_first_rx     = 1;
                 last_a_seq        = buf[0];  /* 记录A板seq，下次发包带回 */
-                a_confirmed_seq   = buf[4];  /* A板确认的B板seq */
+                a_confirmed_seq   = buf[8];  /* A板确认的B板seq */
 
                 /* Toggle D2 on K1 long press from A board */
                 if (flags & 0x01) {
@@ -269,9 +235,13 @@ void AppB_UART_RxCplt(uint8_t byte)
                 /* D1 状态从 bit1 读取 */
                 g_state.d1_enabled = (flags >> 1) & 0x01;
 
-                /* Update Vi and add to history */
-                g_state.vi_voltage  = vi_new;
-                ViHistory_Add(vi_new);
+                /* bit2: 无输入标志 → PWM 强制 50% */
+                no_input = (flags >> 2) & 0x01;
+
+                /* Vi values computed on A board (1 kHz sampling) */
+                g_state.vi_voltage = (float)vi_mv  / 1000.0f;
+                g_state.vi_max     = (float)max_mv / 1000.0f;
+                g_state.vi_min     = (float)min_mv / 1000.0f;
 
                 /* Mark communication alive */
                 g_state.last_rx_tick = HAL_GetTick();
@@ -337,10 +307,6 @@ void AppB_EXTI2_Callback(void)
 
     /* Cycle PWM mode */
     g_state.pwm_mode = (PWMMode_t)(((uint8_t)g_state.pwm_mode + 1) % 3);
-
-    /* Clear history when mode changes (fresh start) */
-    vi_hist_idx = 0;
-    vi_hist_full = 0;
 }
 
 /* ================================================================
@@ -414,24 +380,24 @@ static void Display_Update(void)
     line[21] = '\0';
     SSD1306_DrawString(4, 0, line);
 
-    /* Line 5: PWM mode number (debug) */
+    /* Line 5: Vi max value */
     {
         char mline[22];
+        char vs[8];
         memset(mline, ' ', sizeof(mline));
-        memcpy(mline, "ModeNum:", 8);
-        mline[8] = (char)('0' + (uint8_t)g_state.pwm_mode);
-        mline[9] = ' ';
-        /* Also show raw duty % */
-        int pct2 = (int)(g_state.pwm_duty * 100.0f + 0.5f);
-        memcpy(mline + 10, "Duty:", 5);
-        if (pct2 >= 100) { mline[15]='1'; mline[16]=(char)('0'+(pct2/10)%10); mline[17]=(char)('0'+pct2%10); }
-        else if (pct2 >= 10) { mline[15]=(char)('0'+pct2/10); mline[16]=(char)('0'+pct2%10); }
-        else { mline[15]=(char)('0'+pct2); }
+        memcpy(mline, "Mx:", 3);
+        FmtFloat(vs, g_state.vi_max, 2);
+        int pos = 3;
+        for (int i = 0; vs[i]; i++) mline[pos++] = vs[i];
+        mline[pos++] = 'V';
+        memcpy(mline + 11, "Mn:", 3);
+        pos = 14;
+        FmtFloat(vs, g_state.vi_min, 2);
+        for (int i = 0; vs[i]; i++) mline[pos++] = vs[i];
+        mline[pos++] = 'V';
         mline[21] = '\0';
         SSD1306_DrawString(5, 0, mline);
     }
-    /* Line 6: K2 hint */
-    SSD1306_DrawString(6, 0, "K2:Follow/Max/Min ");
 
     SSD1306_UpdateScreen();
 }
