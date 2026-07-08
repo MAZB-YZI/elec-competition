@@ -8,12 +8,30 @@
 
 ## 目录结构
 
-- `Programmm/`：项目程序文件
+- `Programm/`：STM32 工程项目目录，详见 `Programm/README.md`
 - `.gitignore`：Git 忽略规则
+
+## 当前工程索引
+
+- `ADC/`：ADC 采样基础工程
+- `ADC vision/`：ADC 精度与信号识别相关工程
+- `B_Borad/`：B 板相关工程
+- `BreathingLight/`：呼吸灯基础工程
+- `Encode/`：编码器相关工程
+- `F407 Hal/`：F407 HAL 综合工程
+- `HCSR04Test/`：HC-SR04 超声波测距测试
+- `MyDelay/`：延时函数测试工程
+- `PWM_Breath/`：PWM 呼吸灯工程
+- `PWMcheck/`：PWM 检测/验证工程
+- `Simple UART Tx/`：串口发送基础工程
+- `UART_TEST/`：串口测试工程
+- `stdemo/`：STM32 示例/模板工程
 
 ## 使用说明
 
-后续可以在这里补充各个模块的编译方法、下载方式、硬件连接说明和调试记录。
+1. 查看 `Programm/README.md` 选择对应工程。
+2. 用 STM32CubeMX 打开工程目录下的 `.ioc` 文件查看配置。
+3. 用 Keil MDK 打开 `MDK-ARM/*.uvprojx` 进行编译、下载和调试。
 
 ## 维护计划
 
