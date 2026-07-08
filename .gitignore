@@ -21,9 +21,13 @@ astm/
 *.lnp
 *.sct
 *.tra
+*.scvd
 *.build_log.htm
 JLinkLog.txt
 *.uvoptx
+*.uvguix.*
+**/MDK-ARM/Objects/
+**/MDK-ARM/Listings/
 
 # VS Code
 .vscode/
