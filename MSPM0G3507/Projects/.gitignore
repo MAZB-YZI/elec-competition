@@ -3,7 +3,6 @@ Debug/
 Release/
 
 # IDE settings
-.settings/
 .clangd
 .ccsproject
 .mcp.json
