@@ -61,8 +61,8 @@ int main(void)
 
     // OLED 测试 - 只刷一次
     OLED_Clear();
-    OLED_ShowString(0, 0, (u8 *)"OLED Test OK!", 16);
-    OLED_ShowString(0, 16, (u8 *)"MSPM0G3507", 16);
+    OLED_ShowString(0, 0, "OLED Test OK!", 16);
+    OLED_ShowString(0, 16, "MSPM0G3507", 16);
     OLED_Refresh();
 
     while (1) {
