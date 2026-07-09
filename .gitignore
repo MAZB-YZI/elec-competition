@@ -2,6 +2,13 @@
 数据手册/
 training/
 astm/
+MSPM0G3507/Resources/
+MSPM0G3507/Projects/*/Debug/
+MSPM0G3507/Projects/*/Release/
+MSPM0G3507/Projects/.claude/
+MSPM0G3507/Projects/.codex/
+MSPM0G3507/Projects/.theia/
+*.out
 *.rar
 *.7z
 *.zip
