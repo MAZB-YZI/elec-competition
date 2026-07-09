@@ -1,0 +1,29 @@
+# CCS Debug build output
+Debug/
+Release/
+
+# IDE settings
+.settings/
+.clangd
+
+# Theia
+.theia/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Keil build artifacts
+*.o
+*.d
+*.axf
+*.htm
+*.lnp
+*.lst
+*.map
+*.crf
+*.dep
+*.iex
+*.uvoptx
+Objects/
+Listings/
