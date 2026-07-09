@@ -5,6 +5,12 @@ Release/
 # IDE settings
 .settings/
 .clangd
+.ccsproject
+.mcp.json
+
+# AI tools
+CLAUDE.md
+AGENTS.md
 
 # Theia
 .theia/
