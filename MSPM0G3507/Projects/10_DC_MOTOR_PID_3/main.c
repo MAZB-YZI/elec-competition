@@ -51,13 +51,13 @@ int main(void)
     // NVIC_EnableIRQ(PRINT_INST_INT_IRQN);
     NVIC_EnableIRQ(KEY_INT_IRQN);
     NVIC_EnableIRQ(DC_MOTOR_INT_IRQN);
+    NVIC_EnableIRQ(PRINT_INST_INT_IRQN);  // 启用UART中断
     DL_ADC12_enableConversions(xuanniu_INST);
     DL_Timer_startCounter(SERVO_INST);
     DL_Timer_setCaptureCompareValue(SERVO_INST, 50, GPIO_SERVO_C1_IDX);
     motor_init(1);
     // motor_set_duty(1, 2000);
     target_speed_1 = 300;
-    
 
     // OLED 测试 - 只刷一次
     OLED_Clear();
@@ -65,8 +65,17 @@ int main(void)
     OLED_ShowString(0, 16, "MSPM0G3507", 16);
     OLED_Refresh();
 
+    // 串口测试
+    UART_send_string(PRINT_INST, "=== UART0 Test ===\r\n");
+    UART_send_string(PRINT_INST, "Baud: 115200 8N1\r\n");
+    UART_send_string(PRINT_INST, "TX: PA10, RX: PA11\r\n");
+    UART_send_string(PRINT_INST, "Send char to echo!\r\n\r\n");
+
     while (1) {
+        // 延时测试 - 用串口验证1秒延时
+        UART_send_string(PRINT_INST, "1s delay test...\r\n");
         delay_ms(1000);
+        UART_send_string(PRINT_INST, "Done!\r\n\r\n");
         
 
         
