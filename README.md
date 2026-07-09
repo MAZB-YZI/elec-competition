@@ -8,7 +8,7 @@
 
 ## 目录结构
 
-- `Programm/`：STM32 工程项目目录，详见 `Programm/README.md`
+- `stm32/`：STM32 工程项目目录，详见 `stm32/README.md`
 - `.gitignore`：Git 忽略规则
 
 ## 当前工程索引
@@ -29,7 +29,7 @@
 
 ## 使用说明
 
-1. 查看 `Programm/README.md` 选择对应工程。
+1. 查看 `stm32/README.md` 选择对应工程。
 2. 用 STM32CubeMX 打开工程目录下的 `.ioc` 文件查看配置。
 3. 用 Keil MDK 打开 `MDK-ARM/*.uvprojx` 进行编译、下载和调试。
 

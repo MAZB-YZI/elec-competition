@@ -1,5 +1,7 @@
 # Team Development Rules
 
+Read and follow `CONTRIBUTING.md` before any Git operation.
+
 These rules apply to every human and AI agent working in this repository.
 More specific `AGENTS.md` files under subdirectories add extra requirements.
 
