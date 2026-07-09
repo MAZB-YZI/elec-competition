@@ -59,11 +59,14 @@ int main(void)
     target_speed_1 = 300;
     
 
+    // OLED 测试 - 只刷一次
+    OLED_Clear();
+    OLED_ShowString(0, 0, (u8 *)"OLED Test OK!", 16);
+    OLED_ShowString(0, 16, (u8 *)"MSPM0G3507", 16);
+    OLED_Refresh();
+
     while (1) {
         delay_ms(1000);
-        motor_set_direction(1, 1);
-        delay_ms(1000);
-        motor_set_direction(1, 1);
         
 
         
