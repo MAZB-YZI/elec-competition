@@ -36,10 +36,11 @@
                                 <option id="com.ti.ccstudio.buildDefinitions.TMS470_TICLANG_4.0.compilerID.INCLUDE_PATH.909856147" superClass="com.ti.ccstudio.buildDefinitions.TMS470_TICLANG_4.0.compilerID.INCLUDE_PATH" valueType="includePath">
                                     <listOptionValue value="${COM_TI_MSPM0_SDK_INCLUDE_PATH}"/>
                                     <listOptionValue value="${SYSCONFIG_TOOL_INCLUDE_PATH}"/>
-                                    <listOptionValue value="${PROJECT_ROOT}/BSP/MPU6050"/>
-                                    <listOptionValue value="${PROJECT_ROOT}/BSP/MPU6050/DMP"/>
-                                    <listOptionValue value="${PROJECT_ROOT}/CONTROL"/>
-                                    <listOptionValue value="${PROJECT_ROOT}/drivers"/>
+                                    <listOptionValue value="${PROJECT_ROOT}/../../Modules/BSP"/>
+                                    <listOptionValue value="${PROJECT_ROOT}/../../Modules/Drivers/OLED"/>
+                                    <listOptionValue value="${PROJECT_ROOT}/../../Modules/Drivers/F32C_MOTOR"/>
+                                    <listOptionValue value="${PROJECT_ROOT}/../../Modules/Drivers/UART_DEBUG"/>
+                                    <listOptionValue value="${PROJECT_ROOT}/Control"/>
                                     <listOptionValue value="${PROJECT_ROOT}"/>
                                     <listOptionValue value="${PROJECT_ROOT}/${ConfigName}"/>
                                     <listOptionValue value="${COM_TI_MSPM0_SDK_INSTALL_DIR}/source/third_party/CMSIS/Core/Include"/>
@@ -100,7 +101,6 @@
                     </folderInfo>
                     <sourceEntries>
                         <entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name=""/>
-                        <entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="drivers"/>
                     </sourceEntries>
                 </configuration>
             </storageModule>

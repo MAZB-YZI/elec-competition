@@ -40,7 +40,10 @@
                                 <option id="com.ti.ccstudio.buildDefinitions.TMS470_TICLANG_5.1.compilerID.INCLUDE_PATH.2051563227" superClass="com.ti.ccstudio.buildDefinitions.TMS470_TICLANG_5.1.compilerID.INCLUDE_PATH" valueType="includePath">
                                     <listOptionValue value="${COM_TI_MSPM0_SDK_INCLUDE_PATH}"/>
                                     <listOptionValue value="${SYSCONFIG_TOOL_INCLUDE_PATH}"/>
-                                    <listOptionValue value="${PROJECT_ROOT}/../drivers"/>
+                                    <listOptionValue value="${PROJECT_ROOT}/../../Modules/BSP"/>
+                                    <listOptionValue value="${PROJECT_ROOT}/../../Modules/Drivers/OLED"/>
+                                    <listOptionValue value="${PROJECT_ROOT}/../../Modules/Drivers/DC_MOTOR"/>
+                                    <listOptionValue value="${PROJECT_ROOT}/../../Modules/Drivers/UART_DEBUG"/>
                                     <listOptionValue value="${PROJECT_ROOT}"/>
                                     <listOptionValue value="${PROJECT_ROOT}/${ConfigName}"/>
                                     <listOptionValue value="${COM_TI_MSPM0_SDK_INSTALL_DIR}/source/third_party/CMSIS/Core/Include"/>
