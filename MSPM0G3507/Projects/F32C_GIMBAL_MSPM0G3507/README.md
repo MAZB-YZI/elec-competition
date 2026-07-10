@@ -166,6 +166,59 @@ DISABLE         ← 失能电机
 4. 读取当前位置作为零点
 5. 所有角度命令相对于零点
 
+## 零点设置说明
+
+### 1. 上电自动设零位 ✅
+
+MCU 复位/上电时会自动执行 `Gimbal_SetPowerOnZero()`，读取电机当前位置作为软件零点。
+
+```c
+/* 4. 上电自动设零点（失能状态下可以设零点） */
+if (Gimbal_SetPowerOnZero()) {
+    UART_Debug_SendString("Zero point set OK\r\n");
+} else {
+    UART_Debug_SendString("Zero point timeout!\r\n");
+}
+```
+
+### 2. 任何状态 ZERO 也会设置零位 ✅
+
+任何时候发 `ZERO` 命令都会设置零位，不需要使能电机。
+
+```c
+case DBG_CMD_ZERO:
+    /* 先请求位置反馈，等待更新后再设置零点 */
+    BLDC_ReqFeedback(motor1_ID, FB_MULTI_ANGLE);
+    delay_ms(100);
+    BLDC_ReqFeedback(motor2_ID, FB_MULTI_ANGLE);
+    delay_ms(100);
+    /* 设置零点 */
+    motor1_zero_offset = Motor1_Current_Position;
+    motor2_zero_offset = Motor2_Current_Position;
+    Motor1_T_Position = 0;
+    Motor2_T_Position = 0;
+    break;
+```
+
+### 3. 总结
+
+| 场景 | 是否自动设零位 | 说明 |
+|------|---------------|------|
+| **MCU 上电/复位** | ✅ 是 | 自动执行 `Gimbal_SetPowerOnZero()` |
+| **发 ZERO 命令** | ✅ 是 | 任何时候都可以发，不需要使能电机 |
+
+### 4. 推荐流程
+
+```
+DISABLE         ← 失能电机
+                ← 手掰到想要的位置
+ZERO            ← 设零位（任何状态都可以）
+ENABLE          ← 使能电机
+HOME            ← 回到零位
+SAVE            ← 保存到 EEPROM（永久）
+DISABLE         ← 失能电机
+```
+
 ## 协议说明
 
 帧格式：`0x7A` + 地址 + 命令 + 数据 + BCC校验 + `0x7B`
