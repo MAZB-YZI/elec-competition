@@ -37,7 +37,7 @@ uint8_t Gimbal_SetPowerOnZero(void)
     BLDC_ReqFeedback(motor1_ID, FB_MULTI_ANGLE);
     BLDC_ReqFeedback(motor2_ID, FB_MULTI_ANGLE);
 
-    for (uint16_t i = 0; i < 100; i++) {
+    for (uint16_t i = 0; i < 200; i++) {
         if (motor1_position_valid && motor2_position_valid) {
             motor1_zero_offset = Motor1_Current_Position;
             motor2_zero_offset = Motor2_Current_Position;
