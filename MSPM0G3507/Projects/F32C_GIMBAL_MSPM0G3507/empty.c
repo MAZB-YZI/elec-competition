@@ -192,7 +192,7 @@ int main(void)
     BLDC_SetSpeed(motor2_ID, (int16_t)Motor2_Speed);
     delay_ms(10);
 
-    /* 4. 上电自动设零点（失能状态下可以设零点） */
+    /* 4. 上电自动设零点（读取电机当前位置作为软件零点） */
     if (Gimbal_SetPowerOnZero()) {
         UART_Debug_SendString("Zero point set OK\r\n");
     } else {
