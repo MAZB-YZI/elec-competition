@@ -172,25 +172,25 @@ int main(void)
 
     /* 同步字节，等待电机上电 */
     usart1_send(0x00);
-    delay_ms(3000);  /* 等待 3 秒，让电机充分初始化 */
+    delay_ms(5000);  /* 等待 5 秒，让电机充分初始化 */
 
     /* 1. 使能电机 */
     BLDC_Enable(motor1_ID);
-    delay_ms(1);
+    delay_ms(100);
     BLDC_Enable(motor2_ID);
-    delay_ms(1);
+    delay_ms(100);
 
     /* 2. 设置多圈位置闭环模式 */
     BLDC_SetMode(motor1_ID, motor1_Mode);
-    delay_ms(1);
+    delay_ms(100);
     BLDC_SetMode(motor2_ID, motor2_Mode);
-    delay_ms(1);
+    delay_ms(100);
 
     /* 3. 设置位置模式下的速度 */
     BLDC_SetSpeed(motor1_ID, (int16_t)Motor1_Speed);
-    delay_ms(1);
+    delay_ms(100);
     BLDC_SetSpeed(motor2_ID, (int16_t)Motor2_Speed);
-    delay_ms(10);
+    delay_ms(100);
 
     /* 4. 上电自动设零点（读取电机当前位置作为软件零点） */
     if (Gimbal_SetPowerOnZero()) {
