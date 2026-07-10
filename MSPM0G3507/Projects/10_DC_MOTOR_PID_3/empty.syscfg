@@ -60,21 +60,19 @@ ADC121.adcPin1Config.$name        = "ti_driverlib_gpio_GPIOPinGeneric4";
 const Board = scripting.addModule("/ti/driverlib/Board", {}, false);
 
 GPIO1.$name                         = "LED";
-GPIO1.associatedPins.create(2);
-GPIO1.associatedPins[0].$name       = "LED0";
+GPIO1.associatedPins.create(1);
+GPIO1.associatedPins[0].$name       = "led";
 GPIO1.associatedPins[0].pin.$assign = "PA18";
-GPIO1.associatedPins[1].$name       = "LED1";
-GPIO1.associatedPins[1].pin.$assign = "PA15";
 
 GPIO2.$name                              = "KEY";
 GPIO2.associatedPins.create(2);
-GPIO2.associatedPins[0].$name            = "KEY9";
+GPIO2.associatedPins[0].$name            = "key";
 GPIO2.associatedPins[0].direction        = "INPUT";
 GPIO2.associatedPins[0].internalResistor = "PULL_DOWN";
 GPIO2.associatedPins[0].interruptEn      = true;
 GPIO2.associatedPins[0].polarity         = "RISE";
 GPIO2.associatedPins[0].pin.$assign      = "PB6";
-GPIO2.associatedPins[1].$name            = "KEY10";
+GPIO2.associatedPins[1].$name            = "user_key";
 GPIO2.associatedPins[1].direction        = "INPUT";
 GPIO2.associatedPins[1].internalResistor = "PULL_DOWN";
 GPIO2.associatedPins[1].interruptEn      = true;
