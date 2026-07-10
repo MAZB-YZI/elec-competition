@@ -50,12 +50,12 @@ uint8_t Gimbal_SetPowerOnZero(void)
 
 /*
  * 设置相对角度（单位：度）
- * 内部自动乘以10转成0.1度
+ * 内部自动乘以10转成0.1度，存储为相对位置
  */
 void Gimbal_SetRelativeAngle(float motor1_deg, float motor2_deg)
 {
-    Motor1_T_Position = motor1_zero_offset + (int32_t)(motor1_deg * 10);
-    Motor2_T_Position = motor2_zero_offset + (int32_t)(motor2_deg * 10);
+    Motor1_T_Position = (int32_t)(motor1_deg * 10);
+    Motor2_T_Position = (int32_t)(motor2_deg * 10);
 }
 
 /* 上位机命令回调（value 单位：度，内部也用度） */
@@ -63,10 +63,10 @@ static void on_uart_cmd(uint8_t cmd_type, int32_t value)
 {
     switch (cmd_type) {
     case DBG_CMD_M1_POS:
-        Motor1_T_Position = motor1_zero_offset + value;
+        Motor1_T_Position = value;  /* 相对位置 */
         break;
     case DBG_CMD_M2_POS:
-        Motor2_T_Position = motor2_zero_offset + value;
+        Motor2_T_Position = value;  /* 相对位置 */
         break;
     case DBG_CMD_M1_SPD:
         Motor1_Speed = value;
@@ -107,22 +107,40 @@ static void on_uart_cmd(uint8_t cmd_type, int32_t value)
         BLDC_Disable(motor2_ID);
         break;
     case DBG_CMD_SAVE:
+        /* 先设置硬件零点，再保存参数到 EEPROM */
+        BLDC_SetSingleAngleZero(motor1_ID);
+        delay_ms(10);
+        BLDC_SetSingleAngleZero(motor2_ID);
+        delay_ms(10);
         BLDC_SaveParams(motor1_ID);
-        delay_ms(1);
+        delay_ms(10);
         BLDC_SaveParams(motor2_ID);
         break;
     case DBG_CMD_ZERO:
-        Gimbal_SetPowerOnZero();
+        /* 先请求位置反馈，等待更新后再设置零点 */
+        BLDC_ReqFeedback(motor1_ID, FB_MULTI_ANGLE);
+        delay_ms(100);
+        BLDC_ReqFeedback(motor2_ID, FB_MULTI_ANGLE);
+        delay_ms(100);
+        /* 设置零点 */
+        motor1_zero_offset = Motor1_Current_Position;
+        motor2_zero_offset = Motor2_Current_Position;
         Motor1_T_Position = 0;
         Motor2_T_Position = 0;
         break;
+    case DBG_CMD_HOME:
+        /* 回到零位（主循环会持续发送位置命令） */
+        Motor1_T_Position = 0;
+        Motor2_T_Position = 0;
         break;
     case DBG_CMD_STATUS:
         UART_Debug_SendStatus(Motor1_T_Position,
                               Motor1_Current_Position - motor1_zero_offset,
+                              Motor1_Speed,
                               motor1_Current_Speed,
                               Motor2_T_Position,
                               Motor2_Current_Position - motor2_zero_offset,
+                              Motor2_Speed,
                               motor2_Current_Speed);
         break;
     default:
@@ -148,13 +166,13 @@ int main(void)
     NVIC_EnableIRQ(TIMER_0_INST_INT_IRQN);
 
     /* 初始化外设 */
-    OLED_Init();
+    //OLED_Init();  /* 临时跳过，I2C未接/OLED未响应会卡死 */
     UART_Debug_Init();
     UART_Debug_RegisterCallback(on_uart_cmd);
 
     /* 同步字节，等待电机上电 */
     usart1_send(0x00);
-    delay_ms(1500);
+    delay_ms(3000);  /* 等待 3 秒，让电机充分初始化 */
 
     /* 1. 使能电机 */
     BLDC_Enable(motor1_ID);
@@ -174,7 +192,7 @@ int main(void)
     BLDC_SetSpeed(motor2_ID, (int16_t)Motor2_Speed);
     delay_ms(10);
 
-    /* 4. 上电设零点 */
+    /* 4. 上电自动设零点（失能状态下可以设零点） */
     if (Gimbal_SetPowerOnZero()) {
         UART_Debug_SendString("Zero point set OK\r\n");
     } else {
@@ -187,10 +205,10 @@ int main(void)
         /* 处理上位机命令 */
         UART_Debug_Process();
 
-        /* 发送目标位置（内部度 × 10 = 0.1度给电机） */
-        BLDC_SetMultiAngle(motor1_ID, Motor1_T_Position * 10);
+        /* 发送目标位置（相对零点 + 零点偏移 = 绝对位置） */
+        BLDC_SetMultiAngle(motor1_ID, (Motor1_T_Position + motor1_zero_offset) * 10);
         delay_ms(5);
-        BLDC_SetMultiAngle(motor2_ID, Motor2_T_Position * 10);
+        BLDC_SetMultiAngle(motor2_ID, (Motor2_T_Position + motor2_zero_offset) * 10);
         delay_ms(5);
 
         /* 请求位置反馈 */
@@ -199,7 +217,13 @@ int main(void)
         BLDC_ReqFeedback(motor2_ID, FB_MULTI_ANGLE);
         delay_ms(5);
 
+        /* 请求速度反馈 */
+        BLDC_ReqFeedback(motor1_ID, FB_SPEED);
+        delay_ms(5);
+        BLDC_ReqFeedback(motor2_ID, FB_SPEED);
+        delay_ms(5);
+
         /* 更新 OLED 显示 */
-        OLED_Show();
+        //OLED_Show();  /* 临时跳过 */
     }
 }

@@ -25,12 +25,13 @@ typedef void (*uart_cmd_callback_t)(uint8_t cmd_type, int32_t value);
 #define DBG_CMD_ZERO        14  /* 清零位置 */
 #define DBG_CMD_STATUS      15  /* 请求状态 */
 #define DBG_CMD_SCAN        16  /* 扫描电机ID */
+#define DBG_CMD_HOME        17  /* 回到零位 */
 
 /* 函数声明 */
 void UART_Debug_Init(void);
 void UART_Debug_SendString(const char *str);
-void UART_Debug_SendStatus(int m1_target, int m1_current, int m1_speed,
-                           int m2_target, int m2_current, int m2_speed);
+void UART_Debug_SendStatus(int m1_target, int m1_current, int m1_target_speed, int m1_current_speed,
+                           int m2_target, int m2_current, int m2_target_speed, int m2_current_speed);
 void UART_Debug_RegisterCallback(uart_cmd_callback_t cb);
 void UART_Debug_Process(void);
 

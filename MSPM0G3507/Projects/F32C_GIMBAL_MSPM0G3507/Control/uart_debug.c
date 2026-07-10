@@ -33,18 +33,18 @@ void UART_Debug_SendString(const char *str)
     }
 }
 
-/* 发送状态反馈（角度单位：度，内部值除以10） */
-void UART_Debug_SendStatus(int m1_target, int m1_current, int m1_speed,
-                           int m2_target, int m2_current, int m2_speed)
+/* 发送状态反馈（角度单位：度，速度单位：RPM） */
+void UART_Debug_SendStatus(int m1_target, int m1_current, int m1_target_speed, int m1_current_speed,
+                           int m2_target, int m2_current, int m2_target_speed, int m2_current_speed)
 {
     char buf[80];
 
-    sprintf(buf, "YAW:目标=%d°,当前=%d°,速度=%dRPM\r\n",
-            m1_target, m1_current, m1_speed);
+    sprintf(buf, "YAW:目标=%d°,当前=%d°,目标速度=%dRPM,实时速度=%dRPM\r\n",
+            m1_target, m1_current, m1_target_speed, m1_current_speed);
     UART_Debug_SendString(buf);
 
-    sprintf(buf, "PITCH:目标=%d°,当前=%d°,速度=%dRPM\r\n",
-            m2_target, m2_current, m2_speed);
+    sprintf(buf, "PITCH:目标=%d°,当前=%d°,目标速度=%dRPM,实时速度=%dRPM\r\n",
+            m2_target, m2_current, m2_target_speed, m2_current_speed);
     UART_Debug_SendString(buf);
 }
 
@@ -94,6 +94,8 @@ static void uart_debug_parse_cmd(char *cmd)
         cmd_type = DBG_CMD_ZERO;
     } else if (strcmp(cmd, "STATUS") == 0) {
         cmd_type = DBG_CMD_STATUS;
+    } else if (strcmp(cmd, "HOME") == 0) {
+        cmd_type = DBG_CMD_HOME;
     }
 
     if (cmd_type != DBG_CMD_NONE && cmd_callback != NULL) {

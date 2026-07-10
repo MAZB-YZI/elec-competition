@@ -2,18 +2,19 @@
 
 extern int Motor1_T_Position, Motor2_T_Position;
 
-/* TIMER0 周期中断：参考位置闭环例程，在定时中断内检测按键并修改目标位置。 */
+/* TIMER0 瀹氭椂涓柇锛堟殏鏃剁鐢ㄦ寜閿姛鑳斤紝閬垮厤璇Е鍙戯級 */
 void TIMER_0_INST_IRQHandler(void)
 {
     if (DL_TimerG_getPendingInterrupt(TIMER_0_INST) == DL_TIMER_IIDX_ZERO)
     {
         LED_Flash(100);
 
-        /* 按键每按下一次，两个电机目标位置同时增加 900，即 90.0 度。 */
+        /* 鎸夐敭鍔熻兘鏆傛椂绂佺敤锛岄伩鍏嶈瑙﹀彂淇敼鐩爣浣嶇疆
         if (click() == 1)
         {
             Motor1_T_Position += 900;
             Motor2_T_Position += 900;
         }
+        */
     }
 }
