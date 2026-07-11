@@ -1,32 +1,61 @@
-#ifndef DC_MOTOR_H
-#define DC_MOTOR_H
+/**
+ * motor.h — TB6612 双电机驱动 + PID 速度控制
+ *
+ * 依赖: SysConfig 生成的 ti_msp_dl_config.h
+ * PWM:  TIMG0, CCP0=PA12 (左), CCP1=PA13 (右), timerCount=4000
+ * DIR:  PB19(L_DIR1), PB17(L_DIR2), PA16(R_DIR1), PB24(R_DIR2)
+ * ENC:  PA27/PA26 (编码器A, 左), PA14/PA25 (编码器B, 右)
+ *
+ * TB6612 真值表:
+ *   IN1=H, IN2=L  → 正转 (CW)
+ *   IN1=L, IN2=H  → 反转 (CCW)
+ *   IN1=L, IN2=L  → 短接刹车
+ *   IN1=H, IN2=H  → 停止
+ */
 
+#ifndef __MOTOR_H__
+#define __MOTOR_H__
+
+#include "ti_msp_dl_config.h"
 #include <stdint.h>
+#include <stdbool.h>
 
-typedef enum {
-    MOTOR_LEFT = 0,
-    MOTOR_RIGHT = 1
-} MotorId;
+/* PWM 参数 (与 SysConfig timerCount 一致) */
+#define MOTOR_PWM_MAX     4000
+#define MOTOR_PWM_MIN    -4000
 
-typedef enum {
-    MOTOR_DIR_COAST = 0,
-    MOTOR_DIR_FORWARD,
-    MOTOR_DIR_REVERSE,
-    MOTOR_DIR_BRAKE
-} MotorDirection;
+/* 编码器线数 (每圈脉冲数) */
+#define ENCODER_PPR         11
+#define GEAR_RATIO          30
+#define PULSES_PER_REV      (ENCODER_PPR * GEAR_RATIO)  /* 每圈 330 脉冲 */
+
+/* ---------- 电机接口 ---------- */
+
+void Motor_Init(void);
+void Motor_SetLeftSpeed(int16_t speed);
+void Motor_SetRightSpeed(int16_t speed);
+void Motor_Stop(void);
+void Motor_Brake(void);
+
+/* ---------- 编码器 ---------- */
+
+int32_t Encoder_GetLeftCount(void);
+int32_t Encoder_GetRightCount(void);
+void Encoder_ResetCounts(void);
+
+/* ---------- PID 控制器 ---------- */
 
 typedef struct {
-    uint16_t pwm_period;
-} MotorConfig;
+    float Kp;
+    float Ki;
+    float Kd;
+    float integral;
+    float prev_error;
+    float integral_limit;
+    int16_t output_limit;
+} PID_t;
 
-void Motor_Init(const MotorConfig *config);
-void Motor_SetPWM(int32_t left_pwm, int32_t right_pwm);
-void Motor_Coast(void);
-void Motor_Brake(void);
-void Motor_Stop(void);
-uint16_t Motor_GetPwmPeriod(void);
+void  PID_Init(PID_t *pid, float Kp, float Ki, float Kd, int16_t out_limit);
+int16_t PID_Compute(PID_t *pid, int16_t setpoint, int16_t measurement, float dt);
 
-void Motor_PlatformSetDirection(MotorId motor, MotorDirection direction);
-void Motor_PlatformSetDuty(MotorId motor, uint16_t duty);
-
-#endif
+#endif /* __MOTOR_H__ */

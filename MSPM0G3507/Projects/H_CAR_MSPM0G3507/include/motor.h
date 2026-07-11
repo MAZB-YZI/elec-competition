@@ -1,9 +1,11 @@
 #ifndef HCAR_MOTOR_H
 #define HCAR_MOTOR_H
-#include <stdint.h>
-void Motor_Init(void);
-void Motor_SetPWM(int32_t left_pwm, int32_t right_pwm);
-void Motor_Coast(void);
-void Motor_Brake(void);
-void Motor_Stop(void);
+
+/*
+ * H_CAR uses the reusable TB6612/DC motor module as the single source of
+ * truth. Keep this wrapper so the CCS project can build before its linked
+ * resources are converted through the CCS GUI.
+ */
+#include "../../../Modules/Drivers/DC_MOTOR/motor.h"
+
 #endif

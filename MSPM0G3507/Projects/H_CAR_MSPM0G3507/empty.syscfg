@@ -130,8 +130,9 @@ GPIO8.associatedPins[0].pin.$assign    = "PA26";
 SYSCTL.forceDefaultClkConfig = true;
 SYSCTL.clockTreeEn           = true;
 
-SYSTICK.periodEnable  = true;
-SYSTICK.systickEnable = true;
+/* 禁用 SysConfig 的 SysTick，使用 delay.c 中的 SysTick 延时函数 */
+SYSTICK.periodEnable  = false;
+SYSTICK.systickEnable = false;
 SYSTICK.period        = 16777216;
 
 /**
@@ -142,3 +143,6 @@ SYSTICK.period        = 16777216;
 Board.peripheral.$suggestSolution          = "DEBUGSS";
 Board.peripheral.swclkPin.$suggestSolution = "PA20";
 Board.peripheral.swdioPin.$suggestSolution = "PA19";
+
+SYSCTL.forceDefaultClkConfig = true;
+SYSCTL.clockTreeEn           = true;

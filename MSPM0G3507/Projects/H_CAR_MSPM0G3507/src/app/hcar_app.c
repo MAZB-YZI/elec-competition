@@ -30,7 +30,8 @@ bool HCarApp_Init(void)
     processed_ms = 0;
     self_test = HCAR_TEST_NONE;
     if (!HCarHal_Init()) { fail_safe(); return false; }
-    Motor_Init();
+    MotorConfig motor_config = { HCarHal_GetMotorPeriod() };
+    Motor_Init(&motor_config);
     Encoder_Init();
     Buzzer_Init();
     Motion_Init();
