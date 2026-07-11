@@ -40,12 +40,15 @@ tests/                  PC 单元测试，不加入 CCS 正式目标
 | Motor1 Encoder A / B | PA25 / PA14 |
 | Motor2 PWMB / BIN1 / BIN2 | PA13 / PA16 / PB24 |
 | Motor2 Encoder A / B | PA26 / PA27 |
-| I2C0 SDA / SCL | PA28 / PA31 |
+| OLED 硬件 I2C0 SDA / SCL | PA28 / PA31 |
+| MPU6050 软件 I2C SDA / SCL | PA0 / PA1 |
 | MPU6050 INT | PB4，可选 |
 | Buzzer | PA7 |
 | 声光提示 LED | PB22，开发板板载 LED |
 
 TB6612 STBY 固定接高电平，不占 MCU 引脚。PA16 不再作为旋钮 ADC，PA27 不再作为舵机 PWM。TB6612 逻辑电平按模块确认可接受 0-5 V，但 I2C 上拉必须保持 3.3 V，不能把 MSPM0 引脚拉到 5 V。
+
+注意：扩展板 OLED 接口和 MPU6050 接口不是同一对物理 I2C 线。OLED 座使用 PA28/PA31，MPU6050 座使用 PA0/PA1；二者虽然都可作为 I2C0 复用引脚，但同一个硬件 I2C0 只能选择其中一组。正式小车工程不飞线：OLED 使用硬件 I2C0，MPU6050 保持 PA0/PA1 并改用软件 I2C。PA0/PA1 在正式工程中应作为 GPIO 管理，不得再配置为 I2C0 外设引脚。
 
 ## 路线目标
 
