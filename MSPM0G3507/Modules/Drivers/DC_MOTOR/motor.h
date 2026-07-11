@@ -1,43 +1,32 @@
-#ifndef MOTOR_H
-#define MOTOR_H
+#ifndef DC_MOTOR_H
+#define DC_MOTOR_H
 
-#define PI 3.14
+#include <stdint.h>
 
-// 编码器线数
-#define MOTOR_BIANMAQI 260
-// 轮胎直径 mm
-#define MOTOR_WHEEL_D 67
+typedef enum {
+    MOTOR_LEFT = 0,
+    MOTOR_RIGHT = 1
+} MotorId;
 
-// G3507      TB6612
-// PB24 <--> STBY
-// PA8 <--> AIN1
-// PA9 <--> AIN2
-// PA12 <--> PWMA
-// GND <--> GND
-// 3V3 <--> VCC
+typedef enum {
+    MOTOR_DIR_COAST = 0,
+    MOTOR_DIR_FORWARD,
+    MOTOR_DIR_REVERSE,
+    MOTOR_DIR_BRAKE
+} MotorDirection;
 
-// TB6612    电源模块
-// VM          7.4V
-// GND         GND
+typedef struct {
+    uint16_t pwm_period;
+} MotorConfig;
 
-// TB6612    直流电机1
-// AO1<--> M+
-// AO2<--> M-
+void Motor_Init(const MotorConfig *config);
+void Motor_SetPWM(int32_t left_pwm, int32_t right_pwm);
+void Motor_Coast(void);
+void Motor_Brake(void);
+void Motor_Stop(void);
+uint16_t Motor_GetPwmPeriod(void);
 
-// G3507    直流电机1
-// PA17 <--> A
-// PA18 <--> B
-// 3V3 <--> VCC
-// GND <--> GND
+void Motor_PlatformSetDirection(MotorId motor, MotorDirection direction);
+void Motor_PlatformSetDuty(MotorId motor, uint16_t duty);
 
-// 
-
-// 所有的GND都需要连接在一起
-
-#include "ti_msp_dl_config.h"
-
-void motor_init(uint8_t motor_id);
-void motor_set_duty(uint8_t motor_id, uint32_t duty);
-void motor_set_direction(uint8_t motor_id, uint8_t direction);
-
-#endif // MOTOR_H
+#endif

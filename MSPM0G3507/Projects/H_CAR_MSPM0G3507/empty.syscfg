@@ -1,0 +1,144 @@
+/**
+ * These arguments were used when this file was generated. They will be automatically applied on subsequent loads
+ * via the GUI or CLI. Run CLI with '--help' for additional information on how to override these arguments.
+ * @cliArgs --device "MSPM0G350X" --part "Default" --package "LQFP-64(PM)" --product "mspm0_sdk@2.10.00.04"
+ * @v2CliArgs --device "MSPM0G3507" --package "LQFP-64(PM)" --product "mspm0_sdk@2.10.00.04"
+ * @versions {"tool":"1.28.0+4696"}
+ */
+
+/**
+ * Import the modules used in this configuration.
+ */
+const GPIO    = scripting.addModule("/ti/driverlib/GPIO", {}, false);
+const GPIO1   = GPIO.addInstance();
+const GPIO2   = GPIO.addInstance();
+const GPIO3   = GPIO.addInstance();
+const GPIO4   = GPIO.addInstance();
+const GPIO5   = GPIO.addInstance();
+const GPIO6   = GPIO.addInstance();
+const GPIO7   = GPIO.addInstance();
+const GPIO8   = GPIO.addInstance();
+const I2C     = scripting.addModule("/ti/driverlib/I2C", {}, false);
+const I2C1    = I2C.addInstance();
+const SYSCTL  = scripting.addModule("/ti/driverlib/SYSCTL");
+const SYSTICK = scripting.addModule("/ti/driverlib/SYSTICK");
+const TIMER   = scripting.addModule("/ti/driverlib/TIMER", {}, false);
+const TIMER1  = TIMER.addInstance();
+const UART    = scripting.addModule("/ti/driverlib/UART", {}, false);
+const UART1   = UART.addInstance();
+
+/**
+ * Write custom configuration values to the imported modules.
+ */
+const divider7       = system.clockTree["PLL_PDIV"];
+divider7.divideValue = 2;
+
+const divider9       = system.clockTree["UDIV"];
+divider9.divideValue = 2;
+
+const gate7  = system.clockTree["MFCLKGATE"];
+gate7.enable = true;
+
+const multiplier2         = system.clockTree["PLL_QDIV"];
+multiplier2.multiplyValue = 5;
+
+const mux8       = system.clockTree["HSCLKMUX"];
+mux8.inputSelect = "HSCLKMUX_SYSPLL2X";
+
+const Board = scripting.addModule("/ti/driverlib/Board", {}, false);
+
+I2C1.$name                             = "I2C_OLED";
+I2C1.basicEnableController             = true;
+I2C1.advDigitalGlitchFilter            = "CLOCKS_1";
+I2C1.advControllerRXFIFOTRIG           = "BYTES_8";
+I2C1.advControllerTXFIFOTRIG           = "BYTES_7";
+I2C1.peripheral.$assign                = "I2C0";
+I2C1.peripheral.sdaPin.$assign         = "PA28";
+I2C1.peripheral.sclPin.$assign         = "PA31";
+I2C1.sdaPinConfig.$name                = "ti_driverlib_gpio_GPIOPinGeneric0";
+I2C1.sdaPinConfig.enableConfig         = true;
+I2C1.sdaPinConfig.internalResistor     = "PULL_UP";
+I2C1.sclPinConfig.$name                = "ti_driverlib_gpio_GPIOPinGeneric1";
+I2C1.sclPinConfig.enableConfig         = true;
+I2C1.sclPinConfig.internalResistor     = "PULL_UP";
+
+UART1.$name                            = "UART_DEBUG";
+UART1.targetBaudRate                   = 115200;
+UART1.interruptPriority                = "2";
+UART1.peripheral.$assign               = "UART1";
+UART1.peripheral.rxPin.$assign         = "PB7";
+UART1.peripheral.txPin.$assign         = "PB6";
+UART1.txPinConfig.direction            = scripting.forceWrite("OUTPUT");
+UART1.txPinConfig.hideOutputInversion  = scripting.forceWrite(false);
+UART1.txPinConfig.onlyInternalResistor = scripting.forceWrite(false);
+UART1.txPinConfig.passedPeripheralType = scripting.forceWrite("Digital");
+UART1.txPinConfig.$name                = "ti_driverlib_gpio_GPIOPinGeneric2";
+UART1.rxPinConfig.hideOutputInversion  = scripting.forceWrite(false);
+UART1.rxPinConfig.onlyInternalResistor = scripting.forceWrite(false);
+UART1.rxPinConfig.passedPeripheralType = scripting.forceWrite("Digital");
+UART1.rxPinConfig.$name                = "ti_driverlib_gpio_GPIOPinGeneric3";
+
+TIMER1.$name              = "SYS_TICK";
+TIMER1.timerClkPrescale   = 32;
+TIMER1.timerMode          = "PERIODIC";
+TIMER1.timerPeriod        = "1 ms";
+TIMER1.timerStartTimer    = true;
+TIMER1.interrupts         = ["ZERO"];
+TIMER1.interruptPriority  = "1";
+TIMER1.peripheral.$assign = "TIMG0";
+
+GPIO1.$name                            = "MOTOR1_AIN1";
+GPIO1.associatedPins[0].$name          = "AIN1";
+GPIO1.associatedPins[0].direction      = "OUTPUT";
+GPIO1.associatedPins[0].pin.$assign    = "PB17";
+
+GPIO2.$name                            = "MOTOR1_AIN2";
+GPIO2.associatedPins[0].$name          = "AIN2";
+GPIO2.associatedPins[0].direction      = "OUTPUT";
+GPIO2.associatedPins[0].pin.$assign    = "PB19";
+
+GPIO3.$name                            = "MOTOR2_BIN1";
+GPIO3.associatedPins[0].$name          = "BIN1";
+GPIO3.associatedPins[0].direction      = "OUTPUT";
+GPIO3.associatedPins[0].pin.$assign    = "PA16";
+
+GPIO4.$name                            = "MOTOR2_BIN2";
+GPIO4.associatedPins[0].$name          = "BIN2";
+GPIO4.associatedPins[0].direction      = "OUTPUT";
+GPIO4.associatedPins[0].pin.$assign    = "PB24";
+
+GPIO5.$name                            = "BUZZER";
+GPIO5.associatedPins[0].$name          = "BUZZER_CTRL";
+GPIO5.associatedPins[0].direction      = "OUTPUT";
+GPIO5.associatedPins[0].pin.$assign    = "PA7";
+
+GPIO6.$name                            = "LED_STATUS";
+GPIO6.associatedPins[0].$name          = "LED";
+GPIO6.associatedPins[0].direction      = "OUTPUT";
+GPIO6.associatedPins[0].pin.$assign    = "PB22";
+
+GPIO7.$name                            = "ENCODER1_A";
+GPIO7.associatedPins[0].$name          = "ENC1_A";
+GPIO7.associatedPins[0].direction      = "INPUT";
+GPIO7.associatedPins[0].pin.$assign    = "PA25";
+
+GPIO8.$name                            = "ENCODER2_A";
+GPIO8.associatedPins[0].$name          = "ENC2_A";
+GPIO8.associatedPins[0].direction      = "INPUT";
+GPIO8.associatedPins[0].pin.$assign    = "PA26";
+
+SYSCTL.forceDefaultClkConfig = true;
+SYSCTL.clockTreeEn           = true;
+
+SYSTICK.periodEnable  = true;
+SYSTICK.systickEnable = true;
+SYSTICK.period        = 16777216;
+
+/**
+ * Pinmux solution for unlocked pins/peripherals. This ensures that minor changes to the automatic solver in a future
+ * version of the tool will not impact the pinmux you originally saw.  These lines can be completely deleted in order to
+ * re-solve from scratch.
+ */
+Board.peripheral.$suggestSolution          = "DEBUGSS";
+Board.peripheral.swclkPin.$suggestSolution = "PA20";
+Board.peripheral.swdioPin.$suggestSolution = "PA19";
