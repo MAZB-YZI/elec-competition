@@ -1,43 +1,61 @@
-#ifndef MOTOR_H
-#define MOTOR_H
+/**
+ * motor.h — TB6612 双电机驱动 + PID 速度控制
+ *
+ * 依赖: SysConfig 生成的 ti_msp_dl_config.h
+ * PWM:  TIMG0, CCP0=PA12 (左), CCP1=PA13 (右), timerCount=4000
+ * DIR:  PB19(L_DIR1), PB17(L_DIR2), PA16(R_DIR1), PB24(R_DIR2)
+ * ENC:  PA27/PA26 (编码器A, 左), PA14/PA25 (编码器B, 右)
+ *
+ * TB6612 真值表:
+ *   IN1=H, IN2=L  → 正转 (CW)
+ *   IN1=L, IN2=H  → 反转 (CCW)
+ *   IN1=L, IN2=L  → 短接刹车
+ *   IN1=H, IN2=H  → 停止
+ */
 
-#define PI 3.14
-
-// 编码器线数
-#define MOTOR_BIANMAQI 260
-// 轮胎直径 mm
-#define MOTOR_WHEEL_D 67
-
-// G3507      TB6612
-// PB24 <--> STBY
-// PA8 <--> AIN1
-// PA9 <--> AIN2
-// PA12 <--> PWMA
-// GND <--> GND
-// 3V3 <--> VCC
-
-// TB6612    电源模块
-// VM          7.4V
-// GND         GND
-
-// TB6612    直流电机1
-// AO1<--> M+
-// AO2<--> M-
-
-// G3507    直流电机1
-// PA17 <--> A
-// PA18 <--> B
-// 3V3 <--> VCC
-// GND <--> GND
-
-// 
-
-// 所有的GND都需要连接在一起
+#ifndef __MOTOR_H__
+#define __MOTOR_H__
 
 #include "ti_msp_dl_config.h"
+#include <stdint.h>
+#include <stdbool.h>
 
-void motor_init(uint8_t motor_id);
-void motor_set_duty(uint8_t motor_id, uint32_t duty);
-void motor_set_direction(uint8_t motor_id, uint8_t direction);
+/* PWM 参数 (与 SysConfig timerCount 一致) */
+#define MOTOR_PWM_MAX     4000
+#define MOTOR_PWM_MIN    -4000
 
-#endif // MOTOR_H
+/* 编码器线数 (每圈脉冲数) */
+#define ENCODER_PPR         11
+#define GEAR_RATIO          30
+#define PULSES_PER_REV      (ENCODER_PPR * GEAR_RATIO)  /* 每圈 330 脉冲 */
+
+/* ---------- 电机接口 ---------- */
+
+void Motor_Init(void);
+void Motor_SetLeftSpeed(int16_t speed);
+void Motor_SetRightSpeed(int16_t speed);
+void Motor_Stop(void);
+void Motor_Brake(void);
+
+/* ---------- 编码器 ---------- */
+
+int32_t Encoder_GetLeftCount(void);
+int32_t Encoder_GetRightCount(void);
+void Encoder_ResetCounts(void);
+
+/* ---------- PID 控制器 ---------- */
+
+typedef struct {
+    float Kp;
+    float Ki;
+    float Kd;
+    float integral;
+    float prev_error;
+    float integral_limit;
+    int16_t output_limit;
+} PID_t;
+
+void  PID_Init(PID_t *pid, float Kp, float Ki, float Kd, int16_t out_limit);
+int16_t PID_Compute(PID_t *pid, int16_t setpoint, int16_t measurement, float dt);
+
+#endif /* __MOTOR_H__ */

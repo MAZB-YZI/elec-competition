@@ -1,128 +1,183 @@
+/**
+ * motor.c — TB6612 双电机驱动 + 编码器 + PID (MSPM0 DriverLib)
+ */
+
 #include "motor.h"
 
-void motor_init(uint8_t motor_id)
+/* 编码器脉冲计数 (ISR 中累加) */
+volatile int32_t g_enc_left  = 0;
+volatile int32_t g_enc_right = 0;
+
+/* ================================================================
+ *  电机初始化
+ * ================================================================ */
+void Motor_Init(void)
 {
-    DL_GPIO_setPins(DC_MOTOR_STBY_PORT, DC_MOTOR_STBY_PIN);
-    if(motor_id == 1){
-        DL_Timer_startCounter(PWMA_INST);
-        DL_GPIO_setPins(DC_MOTOR_AIN1_PORT, DC_MOTOR_AIN1_PIN);
-        DL_GPIO_setPins(DC_MOTOR_AIN2_PORT, DC_MOTOR_AIN2_PIN);
-        DL_Timer_setCaptureCompareValue(PWMA_INST, 0, GPIO_PWMA_C0_IDX);
-    }
-    else if(motor_id == 2){
-        // DL_GPIO_setPins(DC_MOTOR_BIN1_PORT, DC_MOTOR_BIN1_PIN);
-        // DL_GPIO_setPins(DC_MOTOR_BIN2_PORT, DC_MOTOR_BIN2_PIN);
-    }
-    DL_Timer_startCounter(MOTOR_PID_INST);
-    NVIC_EnableIRQ(MOTOR_PID_INST_INT_IRQN);
+    Motor_Stop();
+    Encoder_ResetCounts();
 }
 
-void motor_set_duty(uint8_t motor_id, uint32_t duty)
+/* ================================================================
+ *  TB6612 方向控制 (使用 SysConfig 生成的独立端口宏)
+ * ================================================================ */
+
+static void Motor_LeftDir(bool in1, bool in2)
 {
-    if(duty > 4000){
-        duty = 4000;
+    if (in1)
+        DL_GPIO_setPins(MOTOR_DIR_L_DIR1_PORT, MOTOR_DIR_L_DIR1_PIN);
+    else
+        DL_GPIO_clearPins(MOTOR_DIR_L_DIR1_PORT, MOTOR_DIR_L_DIR1_PIN);
+
+    if (in2)
+        DL_GPIO_setPins(MOTOR_DIR_L_DIR2_PORT, MOTOR_DIR_L_DIR2_PIN);
+    else
+        DL_GPIO_clearPins(MOTOR_DIR_L_DIR2_PORT, MOTOR_DIR_L_DIR2_PIN);
+}
+
+static void Motor_RightDir(bool in1, bool in2)
+{
+    if (in1)
+        DL_GPIO_setPins(MOTOR_DIR_R_DIR1_PORT, MOTOR_DIR_R_DIR1_PIN);
+    else
+        DL_GPIO_clearPins(MOTOR_DIR_R_DIR1_PORT, MOTOR_DIR_R_DIR1_PIN);
+
+    if (in2)
+        DL_GPIO_setPins(MOTOR_DIR_R_DIR2_PORT, MOTOR_DIR_R_DIR2_PIN);
+    else
+        DL_GPIO_clearPins(MOTOR_DIR_R_DIR2_PORT, MOTOR_DIR_R_DIR2_PIN);
+}
+
+/* ================================================================
+ *  电机调速
+ * ================================================================ */
+
+void Motor_SetLeftSpeed(int16_t speed)
+{
+    uint16_t duty;
+    if (speed > 0) {
+        Motor_LeftDir(true, false);
+        duty = (uint16_t)speed;
+    } else if (speed < 0) {
+        Motor_LeftDir(false, true);
+        duty = (uint16_t)(-speed);
+    } else {
+        Motor_LeftDir(false, false);
+        duty = 0;
     }
-    if(motor_id == 1){
-        DL_Timer_setCaptureCompareValue(PWMA_INST, duty, GPIO_PWMA_C0_IDX);
+    DL_TimerG_setCaptureCompareValue(PWM_MOTOR_INST,
+        duty, DL_TIMER_CC_0_INDEX);
+}
+
+void Motor_SetRightSpeed(int16_t speed)
+{
+    uint16_t duty;
+    if (speed > 0) {
+        Motor_RightDir(true, false);
+        duty = (uint16_t)speed;
+    } else if (speed < 0) {
+        Motor_RightDir(false, true);
+        duty = (uint16_t)(-speed);
+    } else {
+        Motor_RightDir(false, false);
+        duty = 0;
     }
-    else if(motor_id == 2){
-        // DL_Timer_setCaptureCompareValue(PWMB_INST, speed, GPIO_PWMB_C0_IDX);
+    DL_TimerG_setCaptureCompareValue(PWM_MOTOR_INST,
+        duty, DL_TIMER_CC_1_INDEX);
+}
+
+void Motor_Stop(void)
+{
+    Motor_LeftDir(false, false);
+    Motor_RightDir(false, false);
+    DL_TimerG_setCaptureCompareValue(PWM_MOTOR_INST, 0, DL_TIMER_CC_0_INDEX);
+    DL_TimerG_setCaptureCompareValue(PWM_MOTOR_INST, 0, DL_TIMER_CC_1_INDEX);
+}
+
+void Motor_Brake(void)
+{
+    Motor_LeftDir(true, true);
+    Motor_RightDir(true, true);
+    DL_TimerG_setCaptureCompareValue(PWM_MOTOR_INST,
+        MOTOR_PWM_MAX, DL_TIMER_CC_0_INDEX);
+    DL_TimerG_setCaptureCompareValue(PWM_MOTOR_INST,
+        MOTOR_PWM_MAX, DL_TIMER_CC_1_INDEX);
+}
+
+/* ================================================================
+ *  编码器读取
+ * ================================================================ */
+
+int32_t Encoder_GetLeftCount(void)  { return g_enc_left; }
+int32_t Encoder_GetRightCount(void) { return g_enc_right; }
+
+void Encoder_ResetCounts(void)
+{
+    g_enc_left  = 0;
+    g_enc_right = 0;
+}
+
+/**
+ * @brief 编码器 GPIO 中断处理 (GPIOA)
+ *
+ * 在 GPIOA 中断服务中调用:
+ *   void GROUP1_IRQHandler(void) { Encoder_ISR(); }
+ *
+ * 编码器 A 相上升沿触发, 读 B 相电平判方向:
+ *   B=高 → 正转 (++),  B=低 → 反转 (--)
+ */
+void Encoder_ISR(void)
+{
+    DL_GPIO_IIDX iidx = DL_GPIO_getPendingInterrupt(ENCODER_PORT);
+    uint16_t pin;
+
+    /* 编码器 A (左电机): PA27=A相, PA26=B相 */
+    if (iidx == ENCODER_ENC_A1_IIDX) {
+        DL_GPIO_clearInterruptStatus(ENCODER_PORT, ENCODER_ENC_A1_IIDX);
+        if (DL_GPIO_readPins(ENCODER_PORT, ENCODER_ENC_A2_PIN))
+            g_enc_left++;
+        else
+            g_enc_left--;
+    }
+
+    /* 编码器 B (右电机): PA14=A相, PA25=B相 */
+    else if (iidx == ENCODER_ENC_B1_IIDX) {
+        DL_GPIO_clearInterruptStatus(ENCODER_PORT, ENCODER_ENC_B1_IIDX);
+        if (DL_GPIO_readPins(ENCODER_PORT, ENCODER_ENC_B2_PIN))
+            g_enc_right++;
+        else
+            g_enc_right--;
     }
 }
 
-// direction: 0 停止，1 正转，2 反转
-void motor_set_direction(uint8_t motor_id, uint8_t direction)
+/* ================================================================
+ *  PID 控制器
+ * ================================================================ */
+
+void PID_Init(PID_t *pid, float Kp, float Ki, float Kd, int16_t out_limit)
 {
-    if(motor_id == 1){
-        if(direction == 0){
-            DL_GPIO_setPins(DC_MOTOR_AIN1_PORT, DC_MOTOR_AIN1_PIN);
-            DL_GPIO_setPins(DC_MOTOR_AIN2_PORT, DC_MOTOR_AIN2_PIN);
-        }
-        else if(direction == 1){
-            DL_GPIO_setPins(DC_MOTOR_AIN1_PORT, DC_MOTOR_AIN1_PIN);
-            DL_GPIO_clearPins(DC_MOTOR_AIN2_PORT, DC_MOTOR_AIN2_PIN);
-        }
-        else if(direction == 2){
-            DL_GPIO_clearPins(DC_MOTOR_AIN1_PORT, DC_MOTOR_AIN1_PIN);
-            DL_GPIO_setPins(DC_MOTOR_AIN2_PORT, DC_MOTOR_AIN2_PIN);
-        }
-    }
-    else if(motor_id == 2){
-        // if(direction == 0){
-        //     DL_GPIO_setPins(DC_MOTOR_BIN1_PORT, DC_MOTOR_BIN1_PIN);
-        //     DL_GPIO_setPins(DC_MOTOR_BIN2_PORT, DC_MOTOR_BIN2_PIN);
-        // }
-        // else if(direction == 1){
-        //     DL_GPIO_setPins(DC_MOTOR_BIN1_PORT, DC_MOTOR_BIN1_PIN);
-        //     DL_GPIO_clearPins(DC_MOTOR_BIN2_PORT, DC_MOTOR_BIN2_PIN);
-        // }
-        // else if(direction == 2){
-        //     DL_GPIO_clearPins(DC_MOTOR_BIN1_PORT, DC_MOTOR_BIN1_PIN);
-        //     DL_GPIO_setPins(DC_MOTOR_BIN2_PORT, DC_MOTOR_BIN2_PIN);
-        // }
-    }
+    pid->Kp = Kp; pid->Ki = Ki; pid->Kd = Kd;
+    pid->integral       = 0.0f;
+    pid->prev_error     = 0.0f;
+    pid->integral_limit  = (float)out_limit * 0.5f;
+    pid->output_limit    = out_limit;
 }
 
-
-extern uint32_t counter_1_A;
-float speed_1 = 0;
-float speed_2 = 0;
-
-void calculate_speed(uint8_t motor_id)
+int16_t PID_Compute(PID_t *pid, int16_t setpoint, int16_t measurement, float dt)
 {
-    if (motor_id == 1) {
-        speed_1 = (float)counter_1_A / MOTOR_BIANMAQI * PI * MOTOR_WHEEL_D * 20; // 轮速 mm/s
-        counter_1_A = 0; // 计算完速度后清零计数器
-    }
-    if (motor_id == 2) {
-        // speed_2 = (float)counter_1_B / MOTOR_BIANMAQI * PI * MOTOR_WHEEL_D * 20; // 轮速 mm/s
-        // counter_1_B = 0; // 计算完速度后清零计数器
-    }
+    float error  = (float)(setpoint - measurement);
+    float output = pid->Kp * error;
+
+    pid->integral += error * dt;
+    if (pid->integral >  pid->integral_limit) pid->integral =  pid->integral_limit;
+    if (pid->integral < -pid->integral_limit) pid->integral = -pid->integral_limit;
+    output += pid->Ki * pid->integral;
+
+    if (dt > 0.001f)
+        output += pid->Kd * (error - pid->prev_error) / dt;
+    pid->prev_error = error;
+
+    if (output >  pid->output_limit) output =  pid->output_limit;
+    if (output < -pid->output_limit) output = -pid->output_limit;
+
+    return (int16_t)output;
 }
-
-float kp = 0.5; // 比例系数
-float ki = 0.4; // 积分系数
-
-uint16_t PWM_1_duty = 0;
-float target_speed_1 = 0; // 目标速度 mm/s
-// float target_speed_2 = 0; // 目标速度 mm/s
-float last_error_1 = 0;
-float current_error_1 = 0;
-
-void DC_MOTOR_PID(uint8_t motor_id)
-{
-    float error;
-    if (motor_id == 1) {
-        error = target_speed_1 - speed_1;
-        current_error_1 = error;
-        PWM_1_duty += (uint16_t)(kp * (current_error_1-last_error_1) + ki *(current_error_1));
-        last_error_1 = current_error_1;
-        motor_set_duty(motor_id, PWM_1_duty);
-    }
-    if (motor_id == 2) {
-        // error = target_speed - speed_2;
-        // uint32_t duty = (uint32_t)(error * 100);
-        // motor_set_duty(motor_id, duty);
-    }
-}
-
-void MOTOR_PID_INST_IRQHandler()
-{
-    switch (DL_Timer_getPendingInterrupt(MOTOR_PID_INST))
-    {
-    case DL_TIMER_IIDX_LOAD:
-        calculate_speed(1);
-        DC_MOTOR_PID(1);
-        break;
-    // case DL_TIMER_IIDX_COMPARE_0:
-    //     status = (status + 3 -1) % 3;
-    //     /* code */
-    //     break;
-    
-    default:
-        break;
-    }
-}
-
-
-
