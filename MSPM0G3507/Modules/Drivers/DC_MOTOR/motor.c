@@ -36,12 +36,12 @@ static void Motor_LeftDir(bool in1, bool in2)
 
 static void Motor_RightDir(bool in1, bool in2)
 {
-    if (in1)
+    if (in2)
         DL_GPIO_setPins(MOTOR_DIR_R_DIR1_PORT, MOTOR_DIR_R_DIR1_PIN);
     else
         DL_GPIO_clearPins(MOTOR_DIR_R_DIR1_PORT, MOTOR_DIR_R_DIR1_PIN);
 
-    if (in2)
+    if (in1)
         DL_GPIO_setPins(MOTOR_DIR_R_DIR2_PORT, MOTOR_DIR_R_DIR2_PIN);
     else
         DL_GPIO_clearPins(MOTOR_DIR_R_DIR2_PORT, MOTOR_DIR_R_DIR2_PIN);
