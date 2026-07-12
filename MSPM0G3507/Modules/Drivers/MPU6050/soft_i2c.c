@@ -1,231 +1,343 @@
 #include "soft_i2c.h"
-#include "ti_msp_dl_config.h"
+
 #include "delay.h"
+#include "ti_msp_dl_config.h"
+#include <stddef.h>
 
 /*
- * 软件 I2C 驱动
- * SDA = PA0, SCL = PA1
- * 使用 GPIO 模拟 I2C 时序
- * 引脚由 SysConfig 配置为 SOFT_I2C_SDA / SOFT_I2C_SCL
+ * Software I2C for the Tianmengxing extension-board MPU6050 connector.
+ *
+ * Board wiring:
+ *   SDA = PA0  (SysConfig GPIO group: SOFT_I2C_SDA)
+ *   SCL = PA1  (SysConfig GPIO group: SOFT_I2C_SCL)
+ *
+ * PA0/PA1 share the same I2C0 alternate-function family as the OLED's
+ * PA28/PA31 pins, so the MPU6050 is driven as GPIO bit-banged I2C here.
+ *
+ * Important: I2C high level means "release the bus", not actively drive high.
+ * This implementation drives low with GPIO output enabled and releases high by
+ * disabling the output driver, relying on the 3.3 V pull-up.
  */
 
-/* 引脚定义 (使用 SysConfig 生成的宏) */
-#define SDA_PORT    SOFT_I2C_SDA_PORT
-#define SDA_PIN     SOFT_I2C_SDA_SDA_PIN
-#define SCL_PORT    SOFT_I2C_SCL_PORT
-#define SCL_PIN     SOFT_I2C_SCL_SCL_PIN
+#define SDA_PORT SOFT_I2C_SDA_PORT
+#define SDA_PIN  SOFT_I2C_SDA_SDA_PIN
+#define SCL_PORT SOFT_I2C_SCL_PORT
+#define SCL_PIN  SOFT_I2C_SCL_SCL_PIN
 
-/* I2C 时序延时 (约 2.5us @ 80MHz, 400kHz) */
-#define I2C_DELAY() delay_us(2)
+#define SOFT_I2C_DELAY_US        5U
+#define SOFT_I2C_ACK_TIMEOUT     80U
+#define SOFT_I2C_SCL_TIMEOUT     80U
+#define SOFT_I2C_RECOVERY_CLOCKS 9U
 
-/* SDA/SCL 控制 */
-static void SDA_HIGH(void) { DL_GPIO_setPins(SDA_PORT, SDA_PIN); }
-static void SDA_LOW(void)  { DL_GPIO_clearPins(SDA_PORT, SDA_PIN); }
-static void SCL_HIGH(void) { DL_GPIO_setPins(SCL_PORT, SCL_PIN); }
-static void SCL_LOW(void)  { DL_GPIO_clearPins(SCL_PORT, SCL_PIN); }
+#define I2C_DELAY() delay_us(SOFT_I2C_DELAY_US)
 
-static uint8_t SDA_READ(void)
+static void sda_input_pullup(void)
 {
-    return (DL_GPIO_readPins(SDA_PORT, SDA_PIN) != 0) ? 1 : 0;
-}
-
-/* 设置 SDA 为输出 */
-static void SDA_OUT(void)
-{
-    DL_GPIO_enableOutput(SDA_PORT, SDA_PIN);
-}
-
-/* 设置 SDA 为输入 (推挽模式，需要切换为输入才能读取实际引脚状态) */
-static void SDA_IN(void)
-{
-    /* 禁用输出，切换为输入模式 */
-    DL_GPIO_disableOutput(SDA_PORT, SDA_PIN);
-    /* 配置为输入，启用内部上拉 */
     DL_GPIO_initDigitalInputFeatures(SOFT_I2C_SDA_SDA_IOMUX,
         DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_UP,
         DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
+    DL_GPIO_disableOutput(SDA_PORT, SDA_PIN);
 }
 
-/* 起始条件 */
-static void i2c_start(void)
+static void scl_input_pullup(void)
 {
-    SDA_OUT();
-    SDA_HIGH();
-    SCL_HIGH();
-    I2C_DELAY();
-    SDA_LOW();
-    I2C_DELAY();
-    SCL_LOW();
-    I2C_DELAY();
+    DL_GPIO_initDigitalInputFeatures(SOFT_I2C_SCL_SCL_IOMUX,
+        DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_UP,
+        DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
+    DL_GPIO_disableOutput(SCL_PORT, SCL_PIN);
 }
 
-/* 停止条件 */
+static void sda_low(void)
+{
+    DL_GPIO_initDigitalOutput(SOFT_I2C_SDA_SDA_IOMUX);
+    DL_GPIO_clearPins(SDA_PORT, SDA_PIN);
+    DL_GPIO_enableOutput(SDA_PORT, SDA_PIN);
+}
+
+static void scl_low(void)
+{
+    DL_GPIO_initDigitalOutput(SOFT_I2C_SCL_SCL_IOMUX);
+    DL_GPIO_clearPins(SCL_PORT, SCL_PIN);
+    DL_GPIO_enableOutput(SCL_PORT, SCL_PIN);
+}
+
+static void sda_release(void)
+{
+    sda_input_pullup();
+}
+
+static void scl_release(void)
+{
+    scl_input_pullup();
+}
+
+static bool sda_is_high(void)
+{
+    return (DL_GPIO_readPins(SDA_PORT, SDA_PIN) & SDA_PIN) != 0U;
+}
+
+static bool scl_is_high(void)
+{
+    return (DL_GPIO_readPins(SCL_PORT, SCL_PIN) & SCL_PIN) != 0U;
+}
+
+static bool wait_scl_high(void)
+{
+    for (uint16_t t = 0U; t < SOFT_I2C_SCL_TIMEOUT; ++t) {
+        if (scl_is_high()) {
+            return true;
+        }
+        I2C_DELAY();
+    }
+
+    return false;
+}
+
+static bool clock_high(void)
+{
+    scl_release();
+    I2C_DELAY();
+    return wait_scl_high();
+}
+
 static void i2c_stop(void)
 {
-    SDA_OUT();
-    SDA_LOW();
-    SCL_HIGH();
+    sda_low();
     I2C_DELAY();
-    SDA_HIGH();
+    (void) clock_high();
+    I2C_DELAY();
+    sda_release();
     I2C_DELAY();
 }
 
-/* 等待 ACK */
-static bool i2c_wait_ack(void)
+static bool i2c_start(void)
 {
-    uint8_t timeout = 0;
-
-    SDA_IN();
-    SCL_HIGH();
+    sda_release();
+    scl_release();
     I2C_DELAY();
 
-    while (SDA_READ()) {
-        if (++timeout > 50) {
+    if (!wait_scl_high()) {
+        i2c_stop();
+        return false;
+    }
+
+    sda_low();
+    I2C_DELAY();
+    scl_low();
+    I2C_DELAY();
+    return true;
+}
+
+static bool i2c_wait_ack(void)
+{
+    sda_release();
+
+    if (!clock_high()) {
+        i2c_stop();
+        return false;
+    }
+
+    for (uint16_t t = 0U; t < SOFT_I2C_ACK_TIMEOUT; ++t) {
+        if (!sda_is_high()) {
+            scl_low();
+            I2C_DELAY();
+            return true;
+        }
+        I2C_DELAY();
+    }
+
+    scl_low();
+    i2c_stop();
+    return false;
+}
+
+static bool i2c_write_byte(uint8_t data)
+{
+    for (uint8_t i = 0U; i < 8U; ++i) {
+        scl_low();
+        if ((data & 0x80U) != 0U) {
+            sda_release();
+        } else {
+            sda_low();
+        }
+
+        I2C_DELAY();
+        if (!clock_high()) {
             i2c_stop();
             return false;
         }
-        I2C_DELAY();
-    }
-
-    SCL_LOW();
-    I2C_DELAY();
-    return true;
-}
-
-/* 发送 ACK */
-static void i2c_ack(void)
-{
-    SDA_OUT();
-    SDA_LOW();
-    I2C_DELAY();
-    SCL_HIGH();
-    I2C_DELAY();
-    SCL_LOW();
-    I2C_DELAY();
-    SDA_HIGH();
-}
-
-/* 发送 NACK */
-static void i2c_nack(void)
-{
-    SDA_OUT();
-    SDA_HIGH();
-    I2C_DELAY();
-    SCL_HIGH();
-    I2C_DELAY();
-    SCL_LOW();
-    I2C_DELAY();
-}
-
-/* 发送一个字节 */
-static void i2c_write_byte(uint8_t data)
-{
-    SDA_OUT();
-    SCL_LOW();
-
-    for (uint8_t i = 0; i < 8; i++) {
-        if (data & 0x80) {
-            SDA_HIGH();
-        } else {
-            SDA_LOW();
-        }
+        scl_low();
         data <<= 1;
         I2C_DELAY();
-        SCL_HIGH();
-        I2C_DELAY();
-        SCL_LOW();
-        I2C_DELAY();
     }
+
+    return true;
 }
 
-/* 读一个字节 */
-static uint8_t i2c_read_byte(bool ack)
+static bool i2c_send_ack(bool ack)
 {
-    uint8_t data = 0;
-
-    SDA_IN();
-
-    for (uint8_t i = 0; i < 8; i++) {
-        SCL_LOW();
-        I2C_DELAY();
-        SCL_HIGH();
-        I2C_DELAY();
-        data = (data << 1) | SDA_READ();
-    }
-
+    scl_low();
     if (ack) {
-        i2c_ack();
+        sda_low();
     } else {
-        i2c_nack();
+        sda_release();
     }
 
-    return data;
+    I2C_DELAY();
+    if (!clock_high()) {
+        i2c_stop();
+        return false;
+    }
+    scl_low();
+    sda_release();
+    I2C_DELAY();
+    return true;
 }
 
-/* 初始化软件 I2C */
+static bool i2c_read_byte(uint8_t *data, bool ack)
+{
+    uint8_t value = 0U;
+
+    if (data == NULL) {
+        return false;
+    }
+
+    sda_release();
+
+    for (uint8_t i = 0U; i < 8U; ++i) {
+        value <<= 1;
+        scl_low();
+        I2C_DELAY();
+
+        if (!clock_high()) {
+            i2c_stop();
+            return false;
+        }
+        if (sda_is_high()) {
+            value |= 1U;
+        }
+        scl_low();
+        I2C_DELAY();
+    }
+
+    *data = value;
+    return i2c_send_ack(ack);
+}
+
+static void i2c_bus_recovery(void)
+{
+    sda_release();
+    scl_release();
+    delay_us(50U);
+
+    if (sda_is_high()) {
+        return;
+    }
+
+    for (uint8_t i = 0U; i < SOFT_I2C_RECOVERY_CLOCKS; ++i) {
+        scl_low();
+        I2C_DELAY();
+        scl_release();
+        I2C_DELAY();
+        if (sda_is_high()) {
+            break;
+        }
+    }
+
+    i2c_stop();
+}
+
 void SoftI2C_Init(void)
 {
-    /* PA0/PA1 已在 SysConfig 中配置为 GPIO 输出 */
-    SDA_HIGH();
-    SCL_HIGH();
-    delay_ms(10U);
+    /*
+     * SysConfig initializes PA0/PA1 as GPIO. Keep them in released/high state
+     * before the first transaction, then recover a half-finished transaction if
+     * a previous reset happened while the MPU6050 was driving SDA.
+     */
+    sda_input_pullup();
+    scl_input_pullup();
+    delay_ms(5U);
+    i2c_bus_recovery();
 }
 
-/* 写寄存器 */
+void SoftI2C_TestReleaseBoth(void)
+{
+    sda_release();
+    scl_release();
+}
+
+void SoftI2C_TestPullSdaLow(void)
+{
+    sda_low();
+}
+
+void SoftI2C_TestPullSclLow(void)
+{
+    scl_low();
+}
+
+bool SoftI2C_TestReadSda(void)
+{
+    return sda_is_high();
+}
+
+bool SoftI2C_TestReadScl(void)
+{
+    return scl_is_high();
+}
+
+bool SoftI2C_ProbeAddress(uint8_t addr)
+{
+    bool ok = i2c_start() &&
+              i2c_write_byte((uint8_t) (addr << 1)) &&
+              i2c_wait_ack();
+
+    i2c_stop();
+    return ok;
+}
+
 bool SoftI2C_WriteReg(uint8_t addr, uint8_t reg, uint8_t data)
 {
-    i2c_start();
-    i2c_write_byte((addr << 1) | 0);  /* 写地址 */
-    if (!i2c_wait_ack()) return false;
-
-    i2c_write_byte(reg);               /* 寄存器地址 */
-    if (!i2c_wait_ack()) return false;
-
-    i2c_write_byte(data);              /* 数据 */
-    if (!i2c_wait_ack()) return false;
+    bool ok = i2c_start() &&
+              i2c_write_byte((uint8_t) (addr << 1)) &&
+              i2c_wait_ack() &&
+              i2c_write_byte(reg) &&
+              i2c_wait_ack() &&
+              i2c_write_byte(data) &&
+              i2c_wait_ack();
 
     i2c_stop();
-    return true;
+    return ok;
 }
 
-/* 读寄存器 */
 bool SoftI2C_ReadReg(uint8_t addr, uint8_t reg, uint8_t *data)
 {
-    i2c_start();
-    i2c_write_byte((addr << 1) | 0);  /* 写地址 */
-    if (!i2c_wait_ack()) return false;
-
-    i2c_write_byte(reg);               /* 寄存器地址 */
-    if (!i2c_wait_ack()) return false;
-
-    i2c_start();                       /* 重复起始 */
-    i2c_write_byte((addr << 1) | 1);  /* 读地址 */
-    if (!i2c_wait_ack()) return false;
-
-    *data = i2c_read_byte(false);      /* 读数据，发送 NACK */
-    i2c_stop();
-    return true;
+    return SoftI2C_ReadBytes(addr, reg, data, 1U);
 }
 
-/* 读多个字节 */
 bool SoftI2C_ReadBytes(uint8_t addr, uint8_t reg, uint8_t *buf, uint8_t len)
 {
-    i2c_start();
-    i2c_write_byte((addr << 1) | 0);  /* 写地址 */
-    if (!i2c_wait_ack()) return false;
+    if ((buf == NULL) || (len == 0U)) {
+        return false;
+    }
 
-    i2c_write_byte(reg);               /* 寄存器地址 */
-    if (!i2c_wait_ack()) return false;
+    if (!(i2c_start() &&
+          i2c_write_byte((uint8_t) (addr << 1)) &&
+          i2c_wait_ack() &&
+          i2c_write_byte(reg) &&
+          i2c_wait_ack() &&
+          i2c_start() &&
+          i2c_write_byte((uint8_t) ((addr << 1) | 1U)) &&
+          i2c_wait_ack())) {
+        i2c_stop();
+        return false;
+    }
 
-    i2c_start();                       /* 重复起始 */
-    i2c_write_byte((addr << 1) | 1);  /* 读地址 */
-    if (!i2c_wait_ack()) return false;
-
-    for (uint8_t i = 0; i < len; i++) {
-        if (i < len - 1) {
-            buf[i] = i2c_read_byte(true);   /* 发送 ACK */
-        } else {
-            buf[i] = i2c_read_byte(false);  /* 最后一个发送 NACK */
+    for (uint8_t i = 0U; i < len; ++i) {
+        bool ack = (i + 1U) < len;
+        if (!i2c_read_byte(&buf[i], ack)) {
+            i2c_stop();
+            return false;
         }
     }
 

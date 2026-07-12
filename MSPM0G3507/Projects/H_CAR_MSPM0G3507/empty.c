@@ -1,170 +1,184 @@
-#include "ti_msp_dl_config.h"
-#include "../../../../Modules/Drivers/OLED/oled.h"
-#include "../../../../Modules/Drivers/MPU6050/soft_i2c.h"
 #include "delay.h"
-#include <math.h>
+#include "mpu6050.h"
+#include "ti_msp_dl_config.h"
+#include "../../../Modules/Drivers/MPU6050/soft_i2c.h"
+#include "../../../Modules/Drivers/OLED/oled.h"
 
-/*
- * MPU6050 完整测试 (修复版)
- * - 一次性读取 14 字节
- * - 使用真实 dt
- * - 显示真实 yaw 值
- * - I2C 读取失败检测
- */
+static volatile uint32_t g_ms_ticks = 0U;
 
-#define MPU6050_ADDR 0x68
-#define PI 3.14159f
-#define GYRO_SCALE (1.0f / 131.0f)  /* ±250°/s */
-
-static float gyro_x_bias = 0, gyro_y_bias = 0, gyro_z_bias = 0;
-static float pitch = 0, roll = 0, yaw = 0;
-
-/* 一次性读取 14 字节，返回 bool */
-static bool mpu6050_read_raw(int16_t *ax, int16_t *ay, int16_t *az,
-                             int16_t *gx, int16_t *gy, int16_t *gz)
+static void display_signed_int(uint8_t x, uint8_t y, int32_t value, uint8_t len)
 {
-    uint8_t buf[14];
-    if (!SoftI2C_ReadBytes(MPU6050_ADDR, 0x3B, buf, 14)) {
-        return false;
+    if (value < 0) {
+        OLED_ShowString(x, y, "-", 12);
+        OLED_ShowNum((uint8_t) (x + 8U), y, (uint32_t) (-value), len, 12);
+    } else {
+        OLED_ShowString(x, y, "+", 12);
+        OLED_ShowNum((uint8_t) (x + 8U), y, (uint32_t) value, len, 12);
     }
-    *ax = (int16_t)((buf[0] << 8) | buf[1]);
-    *ay = (int16_t)((buf[2] << 8) | buf[3]);
-    *az = (int16_t)((buf[4] << 8) | buf[5]);
-    *gx = (int16_t)((buf[8] << 8) | buf[9]);
-    *gy = (int16_t)((buf[10] << 8) | buf[11]);
-    *gz = (int16_t)((buf[12] << 8) | buf[13]);
-    return true;
 }
 
-static void calibrate_gyro(uint16_t samples)
+static void display_signed_tenths(uint8_t x, uint8_t y, float value)
 {
-    int32_t sum_x = 0, sum_y = 0, sum_z = 0;
-    int16_t ax, ay, az, gx, gy, gz;
+    int32_t scaled = (int32_t) (value * 10.0f);
+    uint32_t magnitude;
 
-    OLED_Clear();
-    OLED_ShowString(0, 0, "Calibrating...", 16);
-    OLED_ShowString(0, 16, "Keep still!", 16);
-    OLED_Refresh();
-
-    for (uint16_t i = 0; i < samples; i++) {
-        if (mpu6050_read_raw(&ax, &ay, &az, &gx, &gy, &gz)) {
-            sum_x += gx;
-            sum_y += gy;
-            sum_z += gz;
-        }
-        delay_ms(5U);
+    if (scaled < 0) {
+        OLED_ShowString(x, y, "-", 12);
+        magnitude = (uint32_t) (-scaled);
+    } else {
+        OLED_ShowString(x, y, "+", 12);
+        magnitude = (uint32_t) scaled;
     }
 
-    gyro_x_bias = (float)sum_x / samples;
-    gyro_y_bias = (float)sum_y / samples;
-    gyro_z_bias = (float)sum_z / samples;
+    OLED_ShowNum((uint8_t) (x + 8U), y, magnitude / 10U, 3, 12);
+    OLED_ShowString((uint8_t) (x + 32U), y, ".", 12);
+    OLED_ShowNum((uint8_t) (x + 40U), y, magnitude % 10U, 1, 12);
+}
+
+static bool read_who_retry(uint8_t *who)
+{
+    for (uint8_t attempt = 0U; attempt < 10U; ++attempt) {
+        SoftI2C_Init();
+        delay_ms(20U);
+        if (SoftI2C_ProbeAddress(0x68U) &&
+            SoftI2C_ReadReg(0x68U, 0x75U, who)) {
+            return true;
+        }
+        delay_ms(30U);
+    }
+
+    return false;
+}
+
+void SYS_TICK_INST_IRQHandler(void)
+{
+    switch (DL_Timer_getPendingInterrupt(SYS_TICK_INST)) {
+        case DL_TIMER_IIDX_ZERO:
+            ++g_ms_ticks;
+            break;
+        default:
+            break;
+    }
 }
 
 int main(void)
 {
-    int16_t ax, ay, az, gx, gy, gz;
-    uint32_t last_ms = 0, now_ms = 0;
-    bool first = true;
+    float yaw = 0.0f;
+    float gz = 0.0f;
+    float bias = 0.0f;
+    uint8_t who = 0U;
+    uint32_t err_count = 0U;
+    bool who_ok = false;
+    uint32_t last_update_ms = 0U;
+    uint32_t last_display_ms = 0U;
+    uint32_t now_ms = 0U;
+    uint32_t dt_ms = 0U;
 
     SYSCFG_DL_init();
-
     SoftI2C_Init();
     OLED_Init();
+    NVIC_ClearPendingIRQ(SYS_TICK_INST_INT_IRQN);
+    NVIC_EnableIRQ(SYS_TICK_INST_INT_IRQN);
+
     OLED_Clear();
-    OLED_ShowString(0, 0, "MPU6050 V2", 16);
+    OLED_ShowString(0, 0, "MPU6050 TEST", 12);
+    OLED_ShowString(0, 16, "READ WHO...", 12);
     OLED_Refresh();
-    delay_ms(200U);
+    delay_ms(300U);
 
-    /* 唤醒 */
-    SoftI2C_WriteReg(MPU6050_ADDR, 0x6B, 0x01);
-    delay_ms(100U);
-
-    /* 校准 */
-    calibrate_gyro(200);
-
-    /* 初始化角度 */
-    if (mpu6050_read_raw(&ax, &ay, &az, &gx, &gy, &gz)) {
-        float fax = (float)ax / 16384.0f;
-        float fay = (float)ay / 16384.0f;
-        float faz = (float)az / 16384.0f;
-        pitch = atan2f(-fax, sqrtf(fay * fay + faz * faz)) * 180.0f / PI;
-        roll  = atan2f(fay, faz) * 180.0f / PI;
+    who_ok = read_who_retry(&who);
+    if (!who_ok) {
+        OLED_Clear();
+        OLED_ShowString(0, 0, "WHO FAIL", 12);
+        OLED_ShowString(0, 16, "ADDR 0x68", 12);
+        OLED_ShowString(0, 32, "RETRY=10", 12);
+        OLED_Refresh();
+        while (1) {
+            DL_GPIO_togglePins(LED_STATUS_PORT, LED_STATUS_LED_PIN);
+            delay_ms(200U);
+        }
     }
-    yaw = 0.0f;
-    last_ms = 0;
 
-    /* 主循环 */
+    if (!MPU6050_Init()) {
+        OLED_Clear();
+        OLED_ShowString(0, 0, "INIT FAIL", 12);
+        OLED_ShowString(0, 16, "WHO:", 12);
+        OLED_ShowNum(36, 16, who, 3, 12);
+        OLED_Refresh();
+        while (1) {
+            DL_GPIO_togglePins(LED_STATUS_PORT, LED_STATUS_LED_PIN);
+            delay_ms(200U);
+        }
+    }
+
+    OLED_Clear();
+    OLED_ShowString(0, 0, "CALIBRATING", 12);
+    OLED_ShowString(0, 16, "KEEP STILL 2S", 12);
+    OLED_ShowString(0, 32, "WHO:", 12);
+    OLED_ShowNum(36, 32, who, 3, 12);
+    OLED_Refresh();
+
+    delay_ms(500U);
+
+    if (!MPU6050_CalibrateGyro(1000U)) {
+        OLED_Clear();
+        OLED_ShowString(0, 0, "CAL FAIL", 12);
+        OLED_ShowString(0, 16, "ERR:", 12);
+        OLED_ShowNum(36, 16, MPU6050_GetReadErrorCount(), 5, 12);
+        OLED_Refresh();
+        while (1) {
+            DL_GPIO_togglePins(LED_STATUS_PORT, LED_STATUS_LED_PIN);
+            delay_ms(200U);
+        }
+    }
+
+    last_update_ms = g_ms_ticks;
+    last_display_ms = g_ms_ticks;
+
     while (1) {
-        if (!mpu6050_read_raw(&ax, &ay, &az, &gx, &gy, &gz)) {
+        now_ms = g_ms_ticks;
+        dt_ms = now_ms - last_update_ms;
+
+        if (dt_ms > 0U) {
+            last_update_ms = now_ms;
+        }
+
+        if ((dt_ms > 0U) && !MPU6050_Update((float) dt_ms / 1000.0f)) {
             OLED_Clear();
-            OLED_ShowString(0, 0, "I2C ERR!", 16);
+            OLED_ShowString(0, 0, "READ FAIL", 12);
+            OLED_ShowString(0, 16, "ERR:", 12);
+            OLED_ShowNum(36, 16, MPU6050_GetReadErrorCount(), 5, 12);
             OLED_Refresh();
-            delay_ms(500U);
+            DL_GPIO_togglePins(LED_STATUS_PORT, LED_STATUS_LED_PIN);
             continue;
         }
 
-        /* 计算真实 dt (假设主循环约 10ms) */
-        float dt = 0.01f;  /* TODO: 用定时器算真实 dt */
+        yaw = MPU6050_GetYaw();
+        gz = MPU6050_GetGyroZ();
+        bias = MPU6050_GetGyroZBias();
+        err_count = MPU6050_GetReadErrorCount();
 
-        /* 减去零偏 */
-        float gx_dps = ((float)gx - gyro_x_bias) * GYRO_SCALE;
-        float gy_dps = ((float)gy - gyro_y_bias) * GYRO_SCALE;
-        float gz_dps = ((float)gz - gyro_z_bias) * GYRO_SCALE;
+        if ((now_ms - last_display_ms) >= 100U) {
+            last_display_ms = now_ms;
+            OLED_Clear();
+            OLED_ShowString(0, 0, "WHO:", 12);
+            OLED_ShowNum(36, 0, who, 3, 12);
+            OLED_ShowString(64, 0, "ER:", 12);
+            OLED_ShowNum(88, 0, err_count, 4, 12);
 
-        /* 加速度计角度 */
-        float fax = (float)ax / 16384.0f;
-        float fay = (float)ay / 16384.0f;
-        float faz = (float)az / 16384.0f;
-        float accel_pitch = atan2f(-fax, sqrtf(fay * fay + faz * faz)) * 180.0f / PI;
-        float accel_roll  = atan2f(fay, faz) * 180.0f / PI;
+            OLED_ShowString(0, 16, "GZ:", 12);
+            display_signed_tenths(24, 16, gz);
+            OLED_ShowString(64, 16, "BZ:", 12);
+            display_signed_int(88, 16, (int32_t) bias, 3);
 
-        /* Pitch/Roll 直接用加速度计 */
-        pitch = accel_pitch;
-        roll  = accel_roll;
+            OLED_ShowString(0, 32, "YAW:", 12);
+            display_signed_tenths(32, 32, yaw);
 
-        /* Yaw: 陀螺仪积分 */
-        yaw += gz_dps * dt;
+            OLED_ShowString(0, 48, "TURN BOARD", 12);
+            OLED_ShowString(0, 60, "TICK=1ms", 12);
 
-        /* 限制范围 */
-        if (yaw > 180.0f) yaw -= 360.0f;
-        if (yaw < -180.0f) yaw += 360.0f;
-
-        /* 显示 (内部用 -180~+180，显示用 0~359) */
-        OLED_Clear();
-
-        /* Pitch (0~359) */
-        OLED_ShowString(0, 0, "P:", 12);
-        float p360 = pitch < 0 ? pitch + 360 : pitch;
-        OLED_ShowNum(12, 0, (uint32_t)p360, 3, 12);
-
-        /* Roll (0~359) */
-        OLED_ShowString(40, 0, "R:", 12);
-        float r360 = roll < 0 ? roll + 360 : roll;
-        OLED_ShowNum(52, 0, (uint32_t)r360, 3, 12);
-
-        /* Yaw (带符号显示) */
-        OLED_ShowString(80, 0, "Y:", 12);
-        if (yaw < 0.0f) {
-            OLED_ShowString(92, 0, "-", 12);
-            OLED_ShowNum(98, 0, (uint32_t)(-yaw), 3, 12);
-        } else {
-            OLED_ShowString(92, 0, "+", 12);
-            OLED_ShowNum(98, 0, (uint32_t)yaw, 3, 12);
+            OLED_Refresh();
+            DL_GPIO_togglePins(LED_STATUS_PORT, LED_STATUS_LED_PIN);
         }
-
-        /* GZ (带符号显示) */
-        OLED_ShowString(0, 16, "GZ:", 12);
-        if (gz_dps < 0.0f) {
-            OLED_ShowString(24, 16, "-", 12);
-            OLED_ShowNum(30, 16, (uint32_t)(-gz_dps), 3, 12);
-        } else {
-            OLED_ShowString(24, 16, "+", 12);
-            OLED_ShowNum(30, 16, (uint32_t)gz_dps, 3, 12);
-        }
-
-        OLED_Refresh();
-
-        DL_GPIO_togglePins(LED_STATUS_PORT, LED_STATUS_LED_PIN);
-        delay_ms(10U);
     }
 }
