@@ -1,136 +1,160 @@
-/*
- * Copyright (c) 2021, Texas Instruments Incorporated
- * All rights reserved.
+/**
+ * 双电机测试入口
+ * PB21 切换模式
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- *
- * *  Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- *
- * *  Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- *
- * *  Neither the name of Texas Instruments Incorporated nor the names of
- *    its contributors may be used to endorse or promote products derived
- *    from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
- * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
- * PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
- * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
- * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
- * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
- * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
- * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
- * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
- * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * 模式 0: 全停
+ * 模式 1: 双电机正转
+ * 模式 2: 双电机反转
+ * 模式 3: 左正右反
  */
+
+#include <stdint.h>
 
 #include "ti_msp_dl_config.h"
 #include "delay.h"
 #include "oled.h"
-#include <stdio.h>
-#include "uart.h"
-#include "key.h"
-#include "motor.h"
+#include "drivers/key.h"
+#include "drivers/motor.h"
 
-int status = 0;
-extern float target_speed_1;
+extern volatile int32_t counter_1_A;
+extern volatile int32_t counter_2_A;
+static int32_t g_test_left_pwm = 0;
+static int32_t g_test_right_pwm = 0;
+static int32_t g_target_speed_left = 0;
+static int32_t g_target_speed_right = 0;
+extern int32_t PWM_1_duty;
+extern int32_t PWM_2_duty;
+extern float speed_1;
+extern float speed_2;
+
+static void reset_motion_state(void)
+{
+    DL_Timer_stopCounter(MOTOR_PID_INST);
+    motor_pid_reset();
+    g_test_left_pwm = 0;
+    g_test_right_pwm = 0;
+    g_target_speed_left = 0;
+    g_target_speed_right = 0;
+}
+
+static void show_mode(uint8_t mode)
+{
+    OLED_Clear();
+    switch (mode) {
+    case 0:
+        OLED_ShowString(0, 0, "Mode 0: STOP", 16);
+        break;
+    case 1:
+        OLED_ShowString(0, 0, "Mode 1: FWD", 16);
+        OLED_ShowString(0, 48, "PWM open loop", 12);
+        break;
+    case 2:
+        OLED_ShowString(0, 0, "Mode 2: REV", 16);
+        OLED_ShowString(0, 48, "PWM open loop", 12);
+        break;
+    case 3:
+        OLED_ShowString(0, 0, "Mode 3: PID", 16);
+        OLED_ShowString(0, 48, "Target speed", 12);
+        break;
+    default:
+        OLED_ShowString(0, 0, "Mode ?", 16);
+        break;
+    }
+}
 
 int main(void)
 {
+    uint8_t mode = 0U;
+
     SYSCFG_DL_init();
     OLED_Init();
-    OLED_ColorTurn(0);//0正常显示，1 反色显示
-    OLED_DisplayTurn(0);//0正常显示 1 屏幕翻转显示
+    OLED_ColorTurn(0);
+    OLED_DisplayTurn(0);
     OLED_Clear();
-    // NVIC_EnableIRQ(PRINT_INST_INT_IRQN);
+
     NVIC_EnableIRQ(KEY_INT_IRQN);
     NVIC_EnableIRQ(DC_MOTOR_INT_IRQN);
-    NVIC_EnableIRQ(PRINT_INST_INT_IRQN);  // 启用UART中断
-    DL_ADC12_enableConversions(xuanniu_INST);
-    DL_Timer_startCounter(SERVO_INST);
-    DL_Timer_setCaptureCompareValue(SERVO_INST, 50, GPIO_SERVO_C1_IDX);
-    motor_init(1);
-    // motor_set_duty(1, 2000);
-    target_speed_1 = 300;
 
-    // OLED 测试 - 只刷一次
-    OLED_Clear();
-    OLED_ShowString(0, 0, "OLED Test OK!", 16);
-    OLED_ShowString(0, 16, "MSPM0G3507", 16);
+    motor_init(1U);
+    motor_init(2U);
+    reset_motion_state();
+    show_mode(mode);
+    OLED_ShowString(0, 48, "PB21 to switch", 12);
     OLED_Refresh();
 
-    // 串口测试
-    UART_send_string(PRINT_INST, "=== UART0 Test ===\r\n");
-    UART_send_string(PRINT_INST, "Baud: 115200 8N1\r\n");
-    UART_send_string(PRINT_INST, "TX: PA10, RX: PA11\r\n");
-    UART_send_string(PRINT_INST, "Send char to echo!\r\n\r\n");
-
     while (1) {
-        // 延时测试 - 用串口验证1秒延时
-        UART_send_string(PRINT_INST, "1s delay test...\r\n");
-        delay_ms(1000);
-        UART_send_string(PRINT_INST, "Done!\r\n\r\n");
-        
+        if (click()) {
+            mode = (uint8_t) ((mode + 1U) % 4U);
+            reset_motion_state();
 
-        
-        
-        
-        
-        // // 通知ADC开始采样
-        // DL_ADC12_startConversion(xuanniu_INST);
+            if (mode == 1U) {
+                g_test_left_pwm = 1800;
+                g_test_right_pwm = 1800;
+                motor_stop();
+            } else if (mode == 2U) {
+                g_test_left_pwm = -1800;
+                g_test_right_pwm = -1800;
+                motor_stop();
+            } else if (mode == 3U) {
+                g_target_speed_left = 120;
+                g_target_speed_right = 120;
+                target_speed_1 = (float)g_target_speed_left;
+                target_speed_2 = (float)g_target_speed_right;
+                PWM_1_duty = 0;
+                PWM_2_duty = 0;
+                DL_Timer_startCounter(MOTOR_PID_INST);
+            }
 
-        // //等Adc采样完
-        // delay_ms(10);
+            if (mode == 1U || mode == 2U) {
+                motor_set_pwm_lr(g_test_left_pwm, g_test_right_pwm);
+            } else if (mode == 3U) {
+                motor_stop();
+            }
 
-        // // 获取ADC采样结果
-        // uint16_t adc_result = DL_ADC12_getMemResult(xuanniu_INST, xuanniu_ADCMEM_0);
-        // float_t adc_value = adc_result * xuanniu_ADCMEM_0_REF_VOLTAGE_V / 4096.0; // Assuming 12-bit ADC resolution
-        
-        // char oled_str[50];
-        // sprintf(oled_str, "ADC: %.2f V", adc_value);
-        // OLED_ShowString(0, 32, (u8 *)oled_str, 16);
-        // OLED_Refresh();
-        
+            show_mode(mode);
+            OLED_ShowString(0, 48, "PB21 to switch", 12);
+            OLED_Refresh();
+            delay_ms(80U);
+        }
 
-        // if(status == 0){
-        //     OLED_Clear();
-        //     OLED_ShowString(0, 0, (u8 *)"status: 0", 16);
-        //     OLED_Refresh();
-        // } 
-        // else if(status == 1){
-        //     OLED_Clear();
-        //     OLED_ShowString(0, 0, (u8 *)"status: 1", 16);
-        //     OLED_Refresh();
-        // }
-        // else if(status == 2){
-        //     OLED_Clear();
-        //     OLED_ShowString(0, 0, (u8 *)"status: 2", 16);
-        //     OLED_Refresh();
-        // }
-        
+        OLED_ShowString(0, 14, "L:", 12);
+        OLED_ShowString(16, 14, (counter_1_A < 0) ? "-" : "+", 12);
+        OLED_ShowNum(24, 14, (uint32_t)((counter_1_A < 0) ? -counter_1_A : counter_1_A), 5, 12);
+        OLED_ShowString(56, 14, "R:", 12);
+        OLED_ShowString(72, 14, (counter_2_A < 0) ? "-" : "+", 12);
+        OLED_ShowNum(80, 14, (uint32_t)((counter_2_A < 0) ? -counter_2_A : counter_2_A), 5, 12);
 
-        // Toggle the LED every 500 ms
-        // char oled_str[50];
-        // int int_a = 20;
-        // sprintf(oled_str, "Integer: %d", int_a);
-        // OLED_ShowString(0, 46, (u8 *)oled_str, 16);
-        // OLED_Refresh();
-        
+        OLED_ShowString(0, 28, "PWM:", 12);
+        if (mode == 3U) {
+            OLED_ShowString(32, 28, (PWM_1_duty < 0) ? "-" : "+", 12);
+            OLED_ShowNum(40, 28, (uint32_t)((PWM_1_duty < 0) ? -PWM_1_duty : PWM_1_duty), 4, 12);
+        } else {
+            OLED_ShowString(32, 28, (g_test_left_pwm < 0) ? "-" : "+", 12);
+            OLED_ShowNum(40, 28, (uint32_t)((g_test_left_pwm < 0) ? -g_test_left_pwm : g_test_left_pwm), 4, 12);
+        }
+        OLED_ShowString(64, 28, "/", 12);
+        if (mode == 3U) {
+            OLED_ShowString(72, 28, (PWM_2_duty < 0) ? "-" : "+", 12);
+            OLED_ShowNum(80, 28, (uint32_t)((PWM_2_duty < 0) ? -PWM_2_duty : PWM_2_duty), 4, 12);
+        } else {
+            OLED_ShowString(72, 28, (g_test_right_pwm < 0) ? "-" : "+", 12);
+            OLED_ShowNum(80, 28, (uint32_t)((g_test_right_pwm < 0) ? -g_test_right_pwm : g_test_right_pwm), 4, 12);
+        }
 
-        // OLED_ShowString(0, 0, (u8 *)"Hello, TI!", 16);
-        // OLED_Refresh();
-        // delay_ms(500);
-        // DL_GPIO_clearPins(LED_PORT, LED_LED0_PIN);
-        // DL_GPIO_clearPins(LED_PORT, LED_LED1_PIN);
-        // delay_ms(500);
-        // DL_GPIO_setPins(LED_PORT, LED_LED0_PIN);
-        // DL_GPIO_setPins(LED_PORT, LED_LED1_PIN);
-        // UART_send_string(PRINT_INST, "hello, ti!\n");
+        if (mode == 3U) {
+            OLED_ShowString(0, 42, "TS:", 12);
+            OLED_ShowNum(24, 42, (uint32_t)g_target_speed_left, 3, 12);
+            OLED_ShowString(56, 42, "/", 12);
+            OLED_ShowNum(64, 42, (uint32_t)g_target_speed_right, 3, 12);
+            OLED_ShowString(96, 42, "mm/s", 12);
+
+            OLED_ShowString(0, 54, "Sp:", 12);
+            OLED_ShowNum(24, 54, (uint32_t)((speed_1 < 0.0f) ? -speed_1 : speed_1), 3, 12);
+            OLED_ShowString(56, 54, "/", 12);
+            OLED_ShowNum(64, 54, (uint32_t)((speed_2 < 0.0f) ? -speed_2 : speed_2), 3, 12);
+        }
+
+        OLED_Refresh();
+        delay_ms(100U);
     }
 }
