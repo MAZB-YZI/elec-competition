@@ -1,50 +1,7 @@
-# Large data files
-数据手册/
-training/
-astm/
-MSPM0G3507/Resources/
-MSPM0G3507/Projects/*/Debug/
-MSPM0G3507/Projects/*/Release/
-MSPM0G3507/Projects/.claude/
-MSPM0G3507/Projects/.codex/
-MSPM0G3507/Projects/.theia/
-*.out
-*.rar
-*.7z
-*.zip
-*.mp4
-*.avi
+# Ignore everything by default
+*
 
-# Keil MDK build outputs
-*.o
-*.d
-*.axf
-*.htm
-*.hex
-*.map
-*.lst
-*.dep
-*.crf
-*.lnp
-*.sct
-*.tra
-*.scvd
-*.build_log.htm
-JLinkLog.txt
-*.uvoptx
-*.uvguix.*
-**/MDK-ARM/Objects/
-**/MDK-ARM/Listings/
-
-# VS Code
-.vscode/
-*.log
-*.log.lock
-
-# OS
-Thumbs.db
-Desktop.ini
-~$*
-
-# Temp / extracted docs
-_docx_tmp/
+# Whitelist: only track Liner_Car0_Tom project
+!MSPM0G3507/
+!MSPM0G3507/Liner_Car0_Tom/
+!MSPM0G3507/Liner_Car0_Tom/**
