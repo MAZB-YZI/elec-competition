@@ -27,10 +27,36 @@ int main(void)
 {
     JY61P_Status status;
     uint32_t refresh_div = 0U;
+    uint32_t sync_wait_ms = 0U;
+    bool yaw_zeroed = false;
 
     SYSCFG_DL_init();
     OLED_Init();
     JY61P_Init();
+
+    /*
+     * 启动同步完成后，等到收到第一帧有效角度数据，再把当前姿态
+     * 作为零点。这样可以保留“插着模块也能启动”的同步流程，
+     * 同时恢复“上电自动归零开始”的使用习惯。
+     */
+    while (sync_wait_ms < 1500U) {
+        (void)JY61P_UpdateStatus(&status);
+        if (status.frame_count > 0U) {
+            JY61P_ResetYaw();
+            yaw_zeroed = true;
+            break;
+        }
+        delay_ms(10U);
+        sync_wait_ms += 10U;
+    }
+
+    if (yaw_zeroed == false) {
+        /*
+         * 超时也不要卡死：继续运行，但保持当前偏移。
+         * 这样至少能继续观察 RX / F53 / YawRaw 是否恢复。
+         */
+        JY61P_ResetYaw();
+    }
 
     while (1) {
         (void)JY61P_UpdateStatus(&status);
