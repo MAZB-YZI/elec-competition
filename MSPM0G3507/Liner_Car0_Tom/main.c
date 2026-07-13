@@ -184,6 +184,13 @@ int main(void)
                 OLED_ShowString(70, 38, "R:", 12);
                 OLED_ShowNum(88, 38, (uint32_t)(spd_R>0?spd_R:-spd_R), 4, 12);
 
+                /* 蓝牙连接状态 (底部) */
+                OLED_ShowString(0, 56, "BT:", 12);
+                if (BT_IsConnected())
+                    OLED_ShowString(24, 56, "OK", 12);
+                else
+                    OLED_ShowString(24, 56, "--", 12);
+
                 OLED_Refresh();
             }
         }
