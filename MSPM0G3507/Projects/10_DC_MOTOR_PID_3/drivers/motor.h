@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include "ti_msp_dl_config.h"
+#include "../../../Modules/Control/pid.h"
 
 #define PI                 3.14f
 #define MOTOR_BIANMAQI     260
@@ -22,7 +23,6 @@ void motor_init(uint8_t motor_id);
 void motor_set_duty(uint8_t motor_id, uint32_t duty);
 void motor_set_direction(uint8_t motor_id, uint8_t direction);
 
-/* reusable motor control API */
 int32_t motor_limit_pwm(int32_t pwm);
 void motor_set_pwm(uint8_t motor_id, int32_t pwm);
 void motor_set_pwm_lr(int32_t left_pwm, int32_t right_pwm);
@@ -32,14 +32,6 @@ void motor_brake(uint8_t motor_id);
 void motor_brake_all(void);
 void motor_stop(void);
 void motor_pid_reset(void);
-
-extern float speed_1;
-extern float speed_2;
-extern float target_speed_1;
-extern float target_speed_2;
-extern int32_t PWM_1_duty;
-extern int32_t PWM_2_duty;
-extern float kp;
-extern float ki;
+void Encoder_ISR(void);
 
 #endif // MOTOR_H

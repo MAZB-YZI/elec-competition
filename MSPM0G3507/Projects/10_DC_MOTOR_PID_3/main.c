@@ -1,160 +1,137 @@
 /**
- * 双电机测试入口
- * PB21 切换模式
+ * main.c — 定时器中断驱动 PID 巡线
  *
- * 模式 0: 全停
- * 模式 1: 双电机正转
- * 模式 2: 双电机反转
- * 模式 3: 左正右反
+ * TIMG6 每 5ms 触发 ISR → 读灰度 → PID → 设电机
+ * 主循环只刷 OLED
  */
 
-#include <stdint.h>
-
 #include "ti_msp_dl_config.h"
-#include "delay.h"
+#include "gray_sensor.h"
+#include "motor.h"
 #include "oled.h"
-#include "drivers/key.h"
-#include "drivers/motor.h"
+#include "delay.h"
 
-extern volatile int32_t counter_1_A;
-extern volatile int32_t counter_2_A;
-static int32_t g_test_left_pwm = 0;
-static int32_t g_test_right_pwm = 0;
-static int32_t g_target_speed_left = 0;
-static int32_t g_target_speed_right = 0;
-extern int32_t PWM_1_duty;
-extern int32_t PWM_2_duty;
-extern float speed_1;
-extern float speed_2;
+#define KP          2.0f
+#define KI          0.1f
+#define KD          0.0f
+#define OUTPUT_LIM  1200
+#define BASE_PWM    1400
+#define DEAD_ZONE   20
+#define LOST_MS     200
 
-static void reset_motion_state(void)
+/* ISR 和主循环共享 */
+static volatile uint8_t  g_raw;
+static volatile int16_t  g_pos;
+static volatile int16_t  g_steer;
+static volatile bool     g_new_data;
+
+static PID_t      g_pid;
+static int16_t    g_last_steer;
+static uint32_t   g_lost_cnt;
+
+/* ================================================================
+ *  TIMG6 ISR: 每 5ms
+ * ================================================================ */
+void CTRL_TIMER_INST_IRQHandler(void)
 {
-    DL_Timer_stopCounter(MOTOR_PID_INST);
-    motor_pid_reset();
-    g_test_left_pwm = 0;
-    g_test_right_pwm = 0;
-    g_target_speed_left = 0;
-    g_target_speed_right = 0;
-}
+    switch (DL_Timer_getPendingInterrupt(CTRL_TIMER_INST)) {
+    case DL_TIMER_IIDX_LOAD: {
+        uint8_t raw = GraySensor_Read();
+        int16_t pos = GraySensor_GetPosition(raw);
+        int16_t steer;
 
-static void show_mode(uint8_t mode)
-{
-    OLED_Clear();
-    switch (mode) {
-    case 0:
-        OLED_ShowString(0, 0, "Mode 0: STOP", 16);
+        if (pos >= 0) {
+            int16_t err = pos - 350;
+            if (err > DEAD_ZONE || err < -DEAD_ZONE)
+                steer = PID_Compute(&g_pid, 0, err, 0.005f);
+            else
+                steer = 0;
+            g_last_steer = steer;
+            g_lost_cnt   = 0;
+        } else {
+            steer = g_last_steer;
+            if (++g_lost_cnt > LOST_MS / 5) {
+                Motor_Stop();
+                steer = 0;
+            }
+        }
+
+        Motor_SetLeftSpeed (BASE_PWM - steer);
+        Motor_SetRightSpeed(BASE_PWM + steer);
+
+        g_raw      = raw;
+        g_pos      = pos;
+        g_steer    = steer;
+        g_new_data = true;
         break;
-    case 1:
-        OLED_ShowString(0, 0, "Mode 1: FWD", 16);
-        OLED_ShowString(0, 48, "PWM open loop", 12);
-        break;
-    case 2:
-        OLED_ShowString(0, 0, "Mode 2: REV", 16);
-        OLED_ShowString(0, 48, "PWM open loop", 12);
-        break;
-    case 3:
-        OLED_ShowString(0, 0, "Mode 3: PID", 16);
-        OLED_ShowString(0, 48, "Target speed", 12);
-        break;
-    default:
-        OLED_ShowString(0, 0, "Mode ?", 16);
-        break;
+    }
     }
 }
 
+/* ================================================================
+ *  编码器中断
+ * ================================================================ */
+void GROUP1_IRQHandler(void)
+{
+    Encoder_ISR();
+}
+
+/* ================================================================
+ *  main
+ * ================================================================ */
 int main(void)
 {
-    uint8_t mode = 0U;
-
     SYSCFG_DL_init();
+    Motor_Init();
     OLED_Init();
-    OLED_ColorTurn(0);
-    OLED_DisplayTurn(0);
+    PID_Init(&g_pid, KP, KI, KD, OUTPUT_LIM);
+
     OLED_Clear();
-
-    NVIC_EnableIRQ(KEY_INT_IRQN);
-    NVIC_EnableIRQ(DC_MOTOR_INT_IRQN);
-
-    motor_init(1U);
-    motor_init(2U);
-    reset_motion_state();
-    show_mode(mode);
-    OLED_ShowString(0, 48, "PB21 to switch", 12);
+    OLED_ShowString(0, 0, "LinerCar", 16);
     OLED_Refresh();
 
+    /* 启用中断 (定时器已由 SysConfig 自启) */
+    NVIC_EnableIRQ(CTRL_TIMER_INST_INT_IRQN);
+    NVIC_EnableIRQ(ENCODER_INT_IRQN);
+
+    uint32_t tick = 0;
+
     while (1) {
-        if (click()) {
-            mode = (uint8_t) ((mode + 1U) % 4U);
-            reset_motion_state();
+        /* 等 ISR 通知新数据 */
+        if (g_new_data) {
+            g_new_data = false;
+            if (++tick % 100 == 0) {   /* 500ms 刷一次 */
+                uint8_t  raw   = g_raw;
+                int16_t  pos   = g_pos;
+                int16_t  steer = g_steer;
+                int16_t  L     = BASE_PWM - steer;
+                int16_t  R     = BASE_PWM + steer;
+                int16_t  ds    = steer;
 
-            if (mode == 1U) {
-                g_test_left_pwm = 1800;
-                g_test_right_pwm = 1800;
-                motor_stop();
-            } else if (mode == 2U) {
-                g_test_left_pwm = -1800;
-                g_test_right_pwm = -1800;
-                motor_stop();
-            } else if (mode == 3U) {
-                g_target_speed_left = 120;
-                g_target_speed_right = 120;
-                target_speed_1 = (float)g_target_speed_left;
-                target_speed_2 = (float)g_target_speed_right;
-                PWM_1_duty = 0;
-                PWM_2_duty = 0;
-                DL_Timer_startCounter(MOTOR_PID_INST);
+                OLED_Clear();
+
+                uint8_t i;
+                for (i = 0; i < 8; i++)
+                    OLED_ShowNum(i * 16, 0, (raw >> i) & 1, 1, 16);
+
+                if (pos >= 0) {
+                    OLED_ShowString(0, 20, "P:", 12);
+                    OLED_ShowNum(18, 20, (uint32_t)pos, 3, 12);
+                } else {
+                    OLED_ShowString(0, 20, "LOST", 12);
+                }
+
+                OLED_ShowString(0, 38, "S:", 12);
+                if (ds < 0) { OLED_ShowString(18, 38, "-", 12); ds = -ds; }
+                OLED_ShowNum(28, 38, (uint32_t)ds, 4, 12);
+
+                OLED_ShowString(0, 56, "L:", 12);
+                OLED_ShowNum(20, 56, (uint32_t)(L > 0 ? L : -L), 4, 12);
+                OLED_ShowString(70, 56, "R:", 12);
+                OLED_ShowNum(90, 56, (uint32_t)(R > 0 ? R : -R), 4, 12);
+
+                OLED_Refresh();
             }
-
-            if (mode == 1U || mode == 2U) {
-                motor_set_pwm_lr(g_test_left_pwm, g_test_right_pwm);
-            } else if (mode == 3U) {
-                motor_stop();
-            }
-
-            show_mode(mode);
-            OLED_ShowString(0, 48, "PB21 to switch", 12);
-            OLED_Refresh();
-            delay_ms(80U);
         }
-
-        OLED_ShowString(0, 14, "L:", 12);
-        OLED_ShowString(16, 14, (counter_1_A < 0) ? "-" : "+", 12);
-        OLED_ShowNum(24, 14, (uint32_t)((counter_1_A < 0) ? -counter_1_A : counter_1_A), 5, 12);
-        OLED_ShowString(56, 14, "R:", 12);
-        OLED_ShowString(72, 14, (counter_2_A < 0) ? "-" : "+", 12);
-        OLED_ShowNum(80, 14, (uint32_t)((counter_2_A < 0) ? -counter_2_A : counter_2_A), 5, 12);
-
-        OLED_ShowString(0, 28, "PWM:", 12);
-        if (mode == 3U) {
-            OLED_ShowString(32, 28, (PWM_1_duty < 0) ? "-" : "+", 12);
-            OLED_ShowNum(40, 28, (uint32_t)((PWM_1_duty < 0) ? -PWM_1_duty : PWM_1_duty), 4, 12);
-        } else {
-            OLED_ShowString(32, 28, (g_test_left_pwm < 0) ? "-" : "+", 12);
-            OLED_ShowNum(40, 28, (uint32_t)((g_test_left_pwm < 0) ? -g_test_left_pwm : g_test_left_pwm), 4, 12);
-        }
-        OLED_ShowString(64, 28, "/", 12);
-        if (mode == 3U) {
-            OLED_ShowString(72, 28, (PWM_2_duty < 0) ? "-" : "+", 12);
-            OLED_ShowNum(80, 28, (uint32_t)((PWM_2_duty < 0) ? -PWM_2_duty : PWM_2_duty), 4, 12);
-        } else {
-            OLED_ShowString(72, 28, (g_test_right_pwm < 0) ? "-" : "+", 12);
-            OLED_ShowNum(80, 28, (uint32_t)((g_test_right_pwm < 0) ? -g_test_right_pwm : g_test_right_pwm), 4, 12);
-        }
-
-        if (mode == 3U) {
-            OLED_ShowString(0, 42, "TS:", 12);
-            OLED_ShowNum(24, 42, (uint32_t)g_target_speed_left, 3, 12);
-            OLED_ShowString(56, 42, "/", 12);
-            OLED_ShowNum(64, 42, (uint32_t)g_target_speed_right, 3, 12);
-            OLED_ShowString(96, 42, "mm/s", 12);
-
-            OLED_ShowString(0, 54, "Sp:", 12);
-            OLED_ShowNum(24, 54, (uint32_t)((speed_1 < 0.0f) ? -speed_1 : speed_1), 3, 12);
-            OLED_ShowString(56, 54, "/", 12);
-            OLED_ShowNum(64, 54, (uint32_t)((speed_2 < 0.0f) ? -speed_2 : speed_2), 3, 12);
-        }
-
-        OLED_Refresh();
-        delay_ms(100U);
     }
 }

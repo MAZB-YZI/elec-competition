@@ -2,10 +2,6 @@
 
 extern volatile int32_t counter_1_A;
 extern volatile int32_t counter_2_A;
-extern float last_error_1;
-extern float last_error_2;
-extern float current_error_1;
-extern float current_error_2;
 
 static uint8_t g_pwm_started = 0U;
 static uint8_t g_pid_started = 0U;
@@ -157,16 +153,6 @@ void motor_pid_reset(void)
 {
     counter_1_A = 0;
     counter_2_A = 0;
-    speed_1 = 0.0f;
-    speed_2 = 0.0f;
-    PWM_1_duty = 0;
-    PWM_2_duty = 0;
-    target_speed_1 = 0.0f;
-    target_speed_2 = 0.0f;
-    last_error_1 = 0.0f;
-    last_error_2 = 0.0f;
-    current_error_1 = 0.0f;
-    current_error_2 = 0.0f;
     motor_stop();
 }
 
@@ -185,62 +171,13 @@ static void calculate_speed(uint8_t motor_id)
     }
 }
 
-float kp = 0.18f;
-float ki = 0.02f;
-
-int32_t PWM_1_duty = 0;
-float target_speed_1 = 0.0f;
-float last_error_1 = 0.0f;
-float current_error_1 = 0.0f;
-
-int32_t PWM_2_duty = 0;
-float target_speed_2 = 0.0f;
-float last_error_2 = 0.0f;
-float current_error_2 = 0.0f;
-
-static void DC_MOTOR_PID(uint8_t motor_id)
-{
-    float error;
-    int32_t delta_pwm;
-
-    if (motor_id == 1U) {
-        error = target_speed_1 - speed_1;
-        current_error_1 = error;
-        delta_pwm = (int32_t) (kp * (current_error_1 - last_error_1) + ki * current_error_1);
-        if (delta_pwm > 120) {
-            delta_pwm = 120;
-        } else if (delta_pwm < -120) {
-            delta_pwm = -120;
-        }
-        PWM_1_duty = motor_limit_pwm(PWM_1_duty + delta_pwm);
-        last_error_1 = current_error_1;
-        motor_set_pwm(1U, PWM_1_duty);
-    }
-
-    if (motor_id == 2U) {
-        error = target_speed_2 - speed_2;
-        current_error_2 = error;
-        delta_pwm = (int32_t) (kp * (current_error_2 - last_error_2) + ki * current_error_2);
-        if (delta_pwm > 120) {
-            delta_pwm = 120;
-        } else if (delta_pwm < -120) {
-            delta_pwm = -120;
-        }
-        PWM_2_duty = motor_limit_pwm(PWM_2_duty + delta_pwm);
-        last_error_2 = current_error_2;
-        motor_set_pwm(2U, PWM_2_duty);
-    }
-}
-
 void MOTOR_PID_INST_IRQHandler(void)
 {
     switch (DL_Timer_getPendingInterrupt(MOTOR_PID_INST))
     {
     case DL_TIMER_IIDX_LOAD:
         calculate_speed(1U);
-        DC_MOTOR_PID(1U);
         calculate_speed(2U);
-        DC_MOTOR_PID(2U);
         break;
     default:
         break;

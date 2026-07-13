@@ -80,6 +80,16 @@ void HCarHal_SetBuzzer(bool on)
     else DL_GPIO_clearPins(BUZZER_PORT, BUZZER_BUZZER_CTRL_PIN);
 }
 
+bool EncoderHal_ReadPhaseB(bool left)
+{
+    return HCarHal_ReadEncoderB(left);
+}
+
+void BuzzerHal_SetOutput(bool on)
+{
+    HCarHal_SetBuzzer(on);
+}
+
 void HCarHal_SetStatusLed(bool on)
 {
     if (on) DL_GPIO_setPins(LED_STATUS_PORT, LED_STATUS_LED_PIN);

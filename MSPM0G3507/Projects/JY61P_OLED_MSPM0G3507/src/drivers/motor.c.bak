@@ -1,0 +1,5 @@
+/*
+ * Temporary CCS bridge: compile the reusable module implementation without
+ * hand-editing .cproject. Convert this file to a CCS linked source entry later.
+ */
+#include "../../../../Modules/Drivers/DC_MOTOR/motor.c"
