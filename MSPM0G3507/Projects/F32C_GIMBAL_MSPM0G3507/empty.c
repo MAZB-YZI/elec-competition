@@ -54,8 +54,8 @@ uint8_t Gimbal_SetPowerOnZero(void)
  */
 void Gimbal_SetRelativeAngle(float motor1_deg, float motor2_deg)
 {
-    Motor1_T_Position = (int32_t)(motor1_deg * 10);
-    Motor2_T_Position = (int32_t)(motor2_deg * 10);
+    Motor1_T_Position = (int32_t)(motor1_deg);
+    Motor2_T_Position = (int32_t)(motor2_deg);
 }
 
 /* 上位机命令回调（value 单位：度，内部也用度） */
@@ -85,16 +85,16 @@ static void on_uart_cmd(uint8_t cmd_type, int32_t value)
         BLDC_SetMode(motor2_ID, motor2_Mode);
         break;
     case DBG_CMD_M1_ADD:
-        Motor1_T_Position += value * 10;
+        Motor1_T_Position += value;
         break;
     case DBG_CMD_M1_SUB:
-        Motor1_T_Position -= value * 10;
+        Motor1_T_Position -= value;
         break;
     case DBG_CMD_M2_ADD:
-        Motor2_T_Position += value * 10;
+        Motor2_T_Position += value;
         break;
     case DBG_CMD_M2_SUB:
-        Motor2_T_Position -= value * 10;
+        Motor2_T_Position -= value;
         break;
     case DBG_CMD_ENABLE:
         BLDC_Enable(motor1_ID);
