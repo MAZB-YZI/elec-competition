@@ -1,0 +1,13 @@
+id: ec_vision
+name: EC Vision
+name[zh]: 电赛视觉
+version: 1.0.0
+author: xi
+icon: ""
+desc: NUEDC vision framework - line/blob/target/detect/gimbal
+desc[zh]: 电赛视觉框架:循迹/色块/靶纸/AI识别/独立云台
+files:
+  - main.py
+  - proto.py
+  - params.py
+  - gimbal.py
