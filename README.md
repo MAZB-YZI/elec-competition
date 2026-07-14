@@ -24,7 +24,8 @@ elec-competition/
 │   ├── Projects/                  # 工程项目
 │   │   ├── H_CAR_MSPM0G3507/     # H题主线工程（速度环测试）
 │   │   ├── JY61P_OLED_MSPM0G3507/ # JY61P 陀螺仪测试工程
-│   │   └── 10_DC_MOTOR_PID_3/    # 电机+编码器+PID 测试工程
+│   │   ├── 10_DC_MOTOR_PID_3/    # 电机+编码器+PID 测试工程
+│   │   └── F32C_GIMBAL_MSPM0G3507/ # 云台工程
 │   └── Liner_Car0_Tom/            # 队友主线工程（巡线+直角+蓝牙调参）
 ├── stm32/                         # STM32 旧工程（已废弃）
 └── Resources/                     # 硬件资料、烧录工具等
