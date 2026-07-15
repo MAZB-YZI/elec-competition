@@ -1,0 +1,18 @@
+# CCS 工程配置（自动生成）
+.ccsproject
+.cproject
+.project
+.clangd
+.settings/
+
+# 编译产物
+Debug/
+
+# 备份文件
+*.bak
+
+# 调试器配置
+targetConfigs/
+
+# README
+README.md

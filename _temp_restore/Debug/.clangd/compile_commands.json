@@ -1,0 +1,7 @@
+[
+   {
+      "directory" : "D:/TI_MSPM0/CCS_Workspace/_temp_restore/Debug",
+      "command"   : "clang++ -D__MSPM0G3507__ -D__USE_SYSCONFIG__ -I\"D:/TI_MSPM0/CCS_Workspace/_temp_restore\" -I\"D:/TI_MSPM0/CCS_Workspace/_temp_restore/Debug\" -I\"D:/TI_MSPM0/mspm0_sdk_2_10_00_04/source/third_party/CMSIS/Core/Include\" -I\"D:/TI_MSPM0/mspm0_sdk_2_10_00_04/source\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/armv7em-ti-none-eabihf/c++/v1\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/c++/v1\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/lib/clang/22/include\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/c\" -I\"D:/TI_MSPM0/CCS_Workspace/_temp_restore/Debug/syscfg\" -xc",
+      "file"      : "D:/TI_MSPM0/CCS_Workspace/_temp_restore/Debug/syscfg/ti_msp_dl_config.c"
+   }
+]
