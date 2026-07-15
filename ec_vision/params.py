@@ -38,7 +38,12 @@ DEFAULTS = {
                "duty_min": 3.0, "duty_max": 12.0, "duty_center": 7.5,
                "drv": 1,           # 云台驱动: 1=F32C无刷总线电机(实际硬件) 0=PWM舵机(备用)
                                    # 改 drv 后重启程序生效(驱动只在进 GIMB 时初始化一次)
-               "src": 0,           # 跟踪源: 0=BLOB最大色块(原行为) 1=靶心(复用TARGET页检测参数)
+               # 目标点/瞄准点组合(详见 main.py _proc_gimbal 注释):
+               #   0=色块/中心+AimOff  1=靶心/中心+AimOff  2=靶心/实测激光★  3=6cm圆动点/实测激光★
+               "src": 0,
+               "circ_r": 40,       # Src=3 画圆半径(px)。题目要 6cm, 先按固定距离手标;
+                                   #   靶心检测给的 size 可换算 px/cm, 后续可做自动标定
+               "circ_t": 20.0,     # Src=3 转一圈的秒数(题目: 小车1圈20s)
                "dead_px": 3,       # 死区(px): 误差小于此值云台不动, 消抖振
                "max_step": 0.25,   # [仅PWM] 单帧占空比最大步进(%), 防猛甩
                "lock_px": 6,       # |ex|,|ey| 同时小于此值连续10帧 => 屏显 LOCK
@@ -150,7 +155,9 @@ EDITABLE = {
         ("Rmin", ("circle", "r_min"), 2, 1, 200),
         ("Rmax", ("circle", "r_max"), 5, 5, 300),
         ("DownS", ("circle", "downscale"), 1, 1, 4)],
-    5: [("Src", ("gimbal", "src"), 1, 0, 1),
+    5: [("Src", ("gimbal", "src"), 1, 0, 3),
+        ("CircR", ("gimbal", "circ_r"), 2, 5, 150),
+        ("CircT", ("gimbal", "circ_t"), 1.0, 2.0, 60.0),
         ("Drv", ("gimbal", "drv"), 1, 0, 1),
         ("PosMd", ("f32c", "pos_mode"), 2, 1, 3),
         ("Axes", ("f32c", "axes"), 1, 1, 3),

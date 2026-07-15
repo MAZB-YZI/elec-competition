@@ -8,6 +8,7 @@ main.py — 电赛视觉框架 (MaixCAM / MaixPy v4)
 import threading
 import struct
 
+import math
 from maix import camera, display, image, touchscreen, app, time, uart, pinmap, err, sys, wdt
 
 import proto
@@ -238,6 +239,8 @@ class VisionApp:
         if m == MODE_GIMBAL:
             self.lock_n = 0
             self.gimb_n = 0
+            self.circ_t0 = time.ticks_ms()   # 画圆相位从进模式那一刻起算
+            self.last_laser = None
             if self._ensure_gimbal():
                 self.gimbal.center()
             # 打印【实际生效】的参数: /root/ec_vision_params.json 里存的值会覆盖代码里的默认值,
@@ -509,16 +512,42 @@ class VisionApp:
         return proto.pack_tag(0, 0, 0, False), "no tag/qr"
 
     def _proc_gimbal(self, img):
-        """云台视觉自闭环: 把跟踪源收敛到瞄准点。
-        Src=0 跟最大色块(原行为); Src=1 跟靶心(打靶题, 复用 TARGET 页调好的检测方法与阈值)。
-        瞄准点 = 画面中心 + AimOff(激光器与相机光轴平行安装时的校靶偏移, 默认0=正中心)。"""
+        """云台视觉自闭环: 误差 = 目标点 - 瞄准点, 驱动云台把它收敛到 0。
+
+        Src 的两个维度(目标点怎么来 / 瞄准点怎么来):
+          0 = 目标点:最大色块      瞄准点:画面中心+AimOff   (原行为)
+          1 = 目标点:靶心          瞄准点:画面中心+AimOff   (激光与光轴近似同心时用)
+          2 = 目标点:靶心          瞄准点:【实测激光光斑】  ★打靶推荐
+          3 = 目标点:靶心+6cm圆上的动点  瞄准点:【实测激光光斑】 ★发挥(3)画圆
+
+        为什么 Src>=2 要实测光斑而不是用 AimOff 常数:
+          激光装在相机外壳上, 与光轴有高度差 b。光斑的像素偏移 = f*b/d, 随距离 d 变化
+          (b=3cm 时, d=50cm 偏 16px、d=150cm 偏 5px, 绕场一圈差 11px ≈ 2cm, 吃掉整个 D1 余量)。
+          实测光斑则误差 = 两个像素坐标相减, 与距离、镜头畸变、激光装歪多少全都无关 —— 量出来的, 不是算出来的。
+        """
         if not self._ensure_gimbal():
             return None, "gimbal:" + self.gim_err
         g = self.p.d["gimbal"]
-        src = int(g.get("src", 0)) % 2
-        ax = img.width() // 2 + int(g.get("aim_off_x", 0))
-        ay = img.height() // 2 + int(g.get("aim_off_y", 0))
-        if src == 1:
+        src = int(g.get("src", 0)) % 4
+        # ---- 瞄准点: 激光光斑(Src>=2) 或 画面中心+AimOff ----
+        aim_src = ""
+        if src >= 2:
+            lz = self._find_biggest(img, self.p.d["target"]["laser_thr"], 2, 2, image.COLOR_RED)
+            if lz:
+                ax, ay = lz[0] + lz[2] // 2, lz[1] + lz[3] // 2
+                self.last_laser = (ax, ay)
+            elif getattr(self, "last_laser", None):
+                ax, ay = self.last_laser          # 光斑丢一两帧: 用上一次(它在画面里几乎不动)
+                aim_src = " lz~"
+            else:
+                ax = img.width() // 2 + int(g.get("aim_off_x", 0))    # 从没见过光斑: 退回常数
+                ay = img.height() // 2 + int(g.get("aim_off_y", 0))
+                aim_src = " NOlz"
+        else:
+            ax = img.width() // 2 + int(g.get("aim_off_x", 0))
+            ay = img.height() // 2 + int(g.get("aim_off_y", 0))
+        # ---- 目标点 ----
+        if src >= 1:
             t = self._find_target_center(img)           # (cx, cy, size) 或 None
             c = (t[0], t[1]) if t else None
             pkt_lost = proto.pack_target(0, 0, 0, False)
@@ -531,8 +560,17 @@ class VisionApp:
             self._draw_center_cross(img, aim=(ax, ay))
             # 丢目标也要打日志(记 nan), 否则"没日志"分不清是 Dbg=0 还是根本没检测到靶心
             self._gimb_log(None, None)
-            return pkt_lost, "no %s" % ("tgt" if src == 1 else "blob")
-        ex, ey = c[0] - ax, c[1] - ay
+            return pkt_lost, "no %s" % ("tgt" if src >= 1 else "blob")
+        # ---- Src=3: 目标点绕靶心走圆, 相位由计时器给 ----
+        # ★ 题目要"小车1圈=光斑1圈, 同步误差<1/4圈"。真机上相位应由主控(它在巡线, 知道圈位置)下发,
+        #   但协议现在只有上行 —— 见 PROTOCOL.md 待办。此处先用本地计时, 够做静态验证。
+        if src == 3:
+            th = 2.0 * math.pi * ((time.ticks_ms() - getattr(self, "circ_t0", 0)) / 1000.0) \
+                 / max(0.5, float(g.get("circ_t", 20.0)))
+            r = float(g.get("circ_r", 40))
+            c = (c[0] + r * math.cos(th), c[1] + r * math.sin(th))
+            img.draw_circle(int(c[0]), int(c[1]), 4, image.COLOR_YELLOW, 1)   # 当前该打的点
+        ex, ey = int(c[0] - ax), int(c[1] - ay)
         self.gimbal.update(ex, ey)
         lk = float(g.get("lock_px", 6))
         # LOCK 只统计"在线的轴": 单轴调试时(如 ID1 烧毁, Axes=2)另一轴的误差永远收不掉,
@@ -548,9 +586,9 @@ class VisionApp:
         if locked:
             img.draw_string(ax + 12, ay - 24, "LOCK", image.COLOR_GREEN, scale=1.2)
         # Src=1 时按 TARGET 帧发"靶心相对瞄准点偏差(px)", 主控可据此蜂鸣/判稳(见 PROTOCOL.md)
-        pkt = proto.pack_target(ex, ey, 0, True) if src == 1 else pkt_blob
+        pkt = proto.pack_target(ex, ey, 0, True) if src >= 1 else pkt_blob
         st = self.gimbal.status_str() if hasattr(self.gimbal, "status_str") else ""
-        return pkt, "e=(%d,%d)%s%s" % (ex, ey, " LOCK" if locked else "", st)
+        return pkt, "e=(%d,%d)%s%s%s" % (ex, ey, " LOCK" if locked else "", st, aim_src)
 
     # ---------------- UI ----------------
     def _build_ui(self):
