@@ -96,10 +96,12 @@ class VisionApp:
         self.last_hb = 0
         self.cam_fail = 0
         self.param_idx = 0
+        self._param_dirty = False   # 有未存盘的参数改动(不按 SV 则重启丢失)
         self.detector = None
         self.det_err = ""
         self.gimbal = None
         self.gim_err = ""
+        self.lock_n = 0          # GIMB: 连续对准帧计数, 达阈值屏显 LOCK
         self.last_qr = ""
 
         # ---- 看门狗 (wdt_ms=0 关闭) ----
@@ -185,7 +187,11 @@ class VisionApp:
         if self.gimbal is not None:
             return True
         try:
-            self.gimbal = Gimbal(self.p)
+            if int(self.p.d["gimbal"].get("drv", 1)) == 1:
+                from f32c import F32CGimbal      # F32C 无刷总线电机(UART1, A30/A31)
+                self.gimbal = F32CGimbal(self.p)
+            else:
+                self.gimbal = Gimbal(self.p)     # PWM 舵机备用方案(PWM6/7, A30/A31)
             self.gim_err = ""
             return True
         except Exception as e:
@@ -229,8 +235,21 @@ class VisionApp:
         self.param_idx = 0
         if m == MODE_DETECT:
             self._ensure_detector()
-        if m == MODE_GIMBAL and self._ensure_gimbal():
-            self.gimbal.center()
+        if m == MODE_GIMBAL:
+            self.lock_n = 0
+            self.gimb_n = 0
+            if self._ensure_gimbal():
+                self.gimbal.center()
+            # 打印【实际生效】的参数: /root/ec_vision_params.json 里存的值会覆盖代码里的默认值,
+            # 所以"我改了默认值"不等于"你跑的就是这个值"。每次进 GIMB 都亮出来, 不用猜。
+            g = self.p.d["gimbal"]
+            f = self.p.d["f32c"]
+            log("GIMB params: Drv=%d Axes=%d Src=%d FKp=%.3f FKd=%.3f FSpd=%d FStep=%.1f Dbg=%d" % (
+                int(g.get("drv", 1)), int(f.get("axes", 3)), int(g.get("src", 0)),
+                f.get("kp", 0), f.get("kd", 0), int(f.get("speed_rpm", 30)),
+                f.get("max_step_deg", 3.0), int(g.get("dbg", 0))))
+            if not int(g.get("dbg", 0)):
+                log("GIMB: Dbg=0 -> 不打印 GIMBLOG。要整定请在 GIMB 页把 Dbg 调成 1(第5个参数)")
 
     @staticmethod
     def _bbox_from_corners(corners):
@@ -262,15 +281,22 @@ class VisionApp:
         """排除顶栏/底栏 UI 区域, 只在画面中间找目标, 避免 UI 像素污染算法。"""
         return [0, self.UI_TOP, img.width(), img.height() - self.UI_TOP - self.UI_BOT]
 
-    def _draw_center_cross(self, img, err_x=None):
-        """画面中心十字 + 横向偏差条: 平移调试时一眼看清偏差方向和大小。"""
-        cx0, cy0 = img.width() // 2, img.height() // 2
-        img.draw_line(cx0, self.UI_TOP, cx0, img.height() - self.UI_BOT, image.COLOR_GRAY, 1)
-        img.draw_line(cx0 - 8, cy0, cx0 + 8, cy0, image.COLOR_YELLOW, 1)
+    def _draw_center_cross(self, img, err_x=None, err_y=None, aim=None):
+        """瞄准点十字 + 偏差条。aim=None 时瞄准点=画面中心(LINE 模式沿用不受影响);
+        GIMB 模式传 aim=(画面中心+AimOff), 双轴偏差条一眼看清收敛方向和大小。"""
+        ax = aim[0] if aim else img.width() // 2
+        ay = aim[1] if aim else img.height() // 2
+        img.draw_line(ax, self.UI_TOP, ax, img.height() - self.UI_BOT, image.COLOR_GRAY, 1)
+        img.draw_line(ax - 8, ay, ax + 8, ay, image.COLOR_YELLOW, 1)
+        img.draw_line(ax, ay - 8, ax, ay + 8, image.COLOR_YELLOW, 1)
         if err_x is not None:
-            bx = max(-cx0, min(cx0, int(err_x)))            # 偏差条: 中心画到目标横向位置
+            bx = max(-ax, min(img.width() - ax, int(err_x)))    # 横向偏差条
             col = image.COLOR_GREEN if abs(err_x) < 15 else image.COLOR_RED
-            img.draw_line(cx0, cy0 + 14, cx0 + bx, cy0 + 14, col, 3)
+            img.draw_line(ax, ay + 14, ax + bx, ay + 14, col, 3)
+        if err_y is not None:
+            by = max(-ay, min(img.height() - ay, int(err_y)))   # 纵向偏差条
+            col = image.COLOR_GREEN if abs(err_y) < 15 else image.COLOR_RED
+            img.draw_line(ax + 14, ay, ax + 14, ay + by, col, 3)
 
     def _proc_line(self, img):
         c = self.p.d["line"]
@@ -483,16 +509,48 @@ class VisionApp:
         return proto.pack_tag(0, 0, 0, False), "no tag/qr"
 
     def _proc_gimbal(self, img):
+        """云台视觉自闭环: 把跟踪源收敛到瞄准点。
+        Src=0 跟最大色块(原行为); Src=1 跟靶心(打靶题, 复用 TARGET 页调好的检测方法与阈值)。
+        瞄准点 = 画面中心 + AimOff(激光器与相机光轴平行安装时的校靶偏移, 默认0=正中心)。"""
         if not self._ensure_gimbal():
             return None, "gimbal:" + self.gim_err
-        pkt, info, center = self._proc_blob(img)
-        cx0, cy0 = img.width() // 2, img.height() // 2
-        self._draw_center_cross(img, (center[0] - cx0) if center else None)
-        if center:
-            self.gimbal.update(center[0] - cx0, center[1] - cy0)
+        g = self.p.d["gimbal"]
+        src = int(g.get("src", 0)) % 2
+        ax = img.width() // 2 + int(g.get("aim_off_x", 0))
+        ay = img.height() // 2 + int(g.get("aim_off_y", 0))
+        if src == 1:
+            t = self._find_target_center(img)           # (cx, cy, size) 或 None
+            c = (t[0], t[1]) if t else None
+            pkt_lost = proto.pack_target(0, 0, 0, False)
         else:
-            self.gimbal.hold()
-        return pkt, info
+            pkt_blob, _, c = self._proc_blob(img)
+            pkt_lost = pkt_blob                          # blob 的无效帧
+        if not c:
+            self.gimbal.hold()                           # 丢目标: 保持当前位置, 不甩不漂
+            self.lock_n = 0
+            self._draw_center_cross(img, aim=(ax, ay))
+            # 丢目标也要打日志(记 nan), 否则"没日志"分不清是 Dbg=0 还是根本没检测到靶心
+            self._gimb_log(None, None)
+            return pkt_lost, "no %s" % ("tgt" if src == 1 else "blob")
+        ex, ey = c[0] - ax, c[1] - ay
+        self.gimbal.update(ex, ey)
+        lk = float(g.get("lock_px", 6))
+        # LOCK 只统计"在线的轴": 单轴调试时(如 ID1 烧毁, Axes=2)另一轴的误差永远收不掉,
+        # 若还参与判定就永远不会 LOCK, 没法验证判稳逻辑。双轴(Axes=3)时自动恢复完整语义。
+        # info 行会同时显示 PIT-only/YAW-only, 所以 LOCK 的含义始终是"所有在线轴已对准", 不会误导。
+        okx = abs(ex) <= lk or not getattr(self.gimbal, "use_yaw", True)
+        oky = abs(ey) <= lk or not getattr(self.gimbal, "use_pitch", True)
+        self.lock_n = self.lock_n + 1 if (okx and oky) else 0
+        locked = self.lock_n >= 10
+        # Dbg=1: 每帧打印 误差 + 指令角, 用于整定
+        self._gimb_log(ex, ey)
+        self._draw_center_cross(img, ex, ey, aim=(ax, ay))
+        if locked:
+            img.draw_string(ax + 12, ay - 24, "LOCK", image.COLOR_GREEN, scale=1.2)
+        # Src=1 时按 TARGET 帧发"靶心相对瞄准点偏差(px)", 主控可据此蜂鸣/判稳(见 PROTOCOL.md)
+        pkt = proto.pack_target(ex, ey, 0, True) if src == 1 else pkt_blob
+        st = self.gimbal.status_str() if hasattr(self.gimbal, "status_str") else ""
+        return pkt, "e=(%d,%d)%s%s" % (ex, ey, " LOCK" if locked else "", st)
 
     # ---------------- UI ----------------
     def _build_ui(self):
@@ -532,6 +590,20 @@ class VisionApp:
         if self.pick_mode:
             self.pick_info = "框选目标(%s)" % path[-1][:3]
 
+    def _gimb_log(self, ex, ey):
+        """Dbg=1 时每帧打印一行, 供 tools/analyze_gimblog.py 分析。
+        格式: GIMBLOG,帧号,ex,ey,yaw指令角,pitch指令角  (逗号分隔; 丢目标时 ex/ey 记 nan)
+        丢目标也照打, 这样"没有 GIMBLOG 输出"就只可能是 Dbg=0, 不会和"没检测到"混淆。"""
+        if not int(self.p.d["gimbal"].get("dbg", 0)):
+            return
+        self.gimb_n = getattr(self, "gimb_n", 0) + 1
+        log("GIMBLOG,%d,%s,%s,%.2f,%.2f" % (
+            self.gimb_n,
+            "nan" if ex is None else int(ex),
+            "nan" if ey is None else int(ey),
+            getattr(self.gimbal, "ang_yaw", 0.0),
+            getattr(self.gimbal, "ang_pitch", 0.0)))
+
     def _param_list(self):
         return EDITABLE.get(self.mode, [])
 
@@ -557,6 +629,11 @@ class VisionApp:
             else:
                 new = round(float(new), 6)
         self.p.set(path, new)
+        # 每次改参数都打一行。banner 只在进模式那一刻打一次, 之后你在触屏上改了什么它不知道
+        # (我曾据此误判 Src 还是 0)。这行让日志始终反映【当前真实生效值】。
+        # 注意: 改完要按 SV 存盘, 否则重启回默认值。
+        log("param: %s = %s%s" % (name, new, "" if self._param_dirty else "   (记得按 SV 存盘)"))
+        self._param_dirty = True
         if path[0] == "global" and name in ("ExpUs", "AWBloc", "Gain", "WB_R", "WB_B"):
             self._apply_cam_params()
 
@@ -629,7 +706,9 @@ class VisionApp:
         return "picked %s L%d-%d A%d-%d B%d-%d" % (path[-1][:3], lmin, lmax, amin, amax, bmin, bmax)
 
     def _param_save(self):
-        self.p.save()
+        if self.p.save():
+            self._param_dirty = False
+            log("param: 已存盘 -> 重启后仍生效")
 
     def _param_text(self):
         lst = self._param_list()

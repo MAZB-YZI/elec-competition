@@ -35,7 +35,34 @@ DEFAULTS = {
     "detect": {"model": "/root/models/test.mud", "conf": 0.5, "preload": 0},
     "circle": {"threshold": 3000, "r_min": 10, "r_max": 100, "downscale": 2},
     "gimbal": {"kp": 0.0040, "kd": 0.0010, "inv_x": 0, "inv_y": 0,
-               "duty_min": 3.0, "duty_max": 12.0, "duty_center": 7.5},
+               "duty_min": 3.0, "duty_max": 12.0, "duty_center": 7.5,
+               "drv": 1,           # 云台驱动: 1=F32C无刷总线电机(实际硬件) 0=PWM舵机(备用)
+                                   # 改 drv 后重启程序生效(驱动只在进 GIMB 时初始化一次)
+               "src": 0,           # 跟踪源: 0=BLOB最大色块(原行为) 1=靶心(复用TARGET页检测参数)
+               "dead_px": 3,       # 死区(px): 误差小于此值云台不动, 消抖振
+               "max_step": 0.25,   # [仅PWM] 单帧占空比最大步进(%), 防猛甩
+               "lock_px": 6,       # |ex|,|ey| 同时小于此值连续10帧 => 屏显 LOCK
+               "aim_off_x": 0,     # 瞄准点偏移(px): 激光器与相机光轴不重合时的校靶量
+               "aim_off_y": 0,
+               "dbg": 0},          # 1=GIMB 每帧打印 GIMBLOG,帧号,ex,ey,yaw,pitch (整定用)
+    # WHEELTEC F32C TTL 无刷云台电机(drv=1 时生效), 协议见 f32c.py 文件头
+    "f32c":  {"yaw_id": 1, "pitch_id": 2,      # 电机总线地址(厂商软件预设 YAW=1 PITCH=2)
+              "baud": 115200,
+              "axes": 2,                       # 在线轴: 3=双轴 1=仅YAW(ID1) 2=仅PITCH(ID2)
+                                               # 当前=2: ID1(X/YAW)已被60V烧毁, 新电机到货后改回3
+                                               # 电机烧坏/拆掉时必须设对, 否则驱动会去戳死地址
+
+              "pos_mode": 3,                   # 位置模式: 3=多圈直通(手册推荐高频改目标) 1=多圈T型(官方例程)
+                                               # 改后重启生效; 直通感觉发抽再切回1
+              "speed_rpm": 30,                 # 位置模式限速(参考工程默认10偏慢, 30更跟手; 上限1000)
+              # ★ 视觉外环增益。注意 update() 里 ang 是累加的, 所以:
+              #    kp 乘的是【误差累加和】= 积分增益 I (是它决定稳定性, 太大必振荡)
+              #    kd 乘的是【当前误差】  = 比例增益 P
+              #    这是 PI 环不是 PD 环。振荡先降 kp, 不是加 kd。
+              # 0.02/0.0 对 1~4 帧的任意环路延迟都稳(|z|<=0.90), 先跑通再往上加。
+              "kp": 0.02, "kd": 0.0,
+              "max_step_deg": 3.0,             # 单帧角度步进上限(度)
+              "yaw_lim": 60.0, "pitch_lim": 40.0},  # 软件限位(度): 保护相机排线, 必设!
 }
 
 
@@ -123,8 +150,24 @@ EDITABLE = {
         ("Rmin", ("circle", "r_min"), 2, 1, 200),
         ("Rmax", ("circle", "r_max"), 5, 5, 300),
         ("DownS", ("circle", "downscale"), 1, 1, 4)],
-    5: [("Kp", ("gimbal", "kp"), 0.0005, 0.0, 0.05),
-        ("Kd", ("gimbal", "kd"), 0.0005, 0.0, 0.05),
+    5: [("Src", ("gimbal", "src"), 1, 0, 1),
+        ("Drv", ("gimbal", "drv"), 1, 0, 1),
+        ("PosMd", ("f32c", "pos_mode"), 2, 1, 3),
+        ("Axes", ("f32c", "axes"), 1, 1, 3),
+        ("Dbg", ("gimbal", "dbg"), 1, 0, 1),
+        ("FKp", ("f32c", "kp"), 0.01, 0.0, 0.5),
+        ("FKd", ("f32c", "kd"), 0.005, 0.0, 0.2),
+        ("FSpd", ("f32c", "speed_rpm"), 5, 5, 100),
+        ("FStep", ("f32c", "max_step_deg"), 0.5, 0.5, 10.0),
+        ("YawLim", ("f32c", "yaw_lim"), 5, 10, 170),
+        ("PitLim", ("f32c", "pitch_lim"), 5, 5, 80),
         ("InvX", ("gimbal", "inv_x"), 1, 0, 1),
-        ("InvY", ("gimbal", "inv_y"), 1, 0, 1)],
+        ("InvY", ("gimbal", "inv_y"), 1, 0, 1),
+        ("DeadPx", ("gimbal", "dead_px"), 1, 0, 30),
+        ("LockPx", ("gimbal", "lock_px"), 1, 1, 50),
+        ("AimOfX", ("gimbal", "aim_off_x"), 2, -160, 160),
+        ("AimOfY", ("gimbal", "aim_off_y"), 2, -120, 120),
+        ("Kp", ("gimbal", "kp"), 0.0005, 0.0, 0.05),
+        ("Kd", ("gimbal", "kd"), 0.0005, 0.0, 0.05),
+        ("MaxStep", ("gimbal", "max_step"), 0.05, 0.05, 1.0)],
 }
