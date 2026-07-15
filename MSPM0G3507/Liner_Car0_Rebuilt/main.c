@@ -17,14 +17,14 @@
 /* ========== 默认参数 (蓝牙可改) ========== */
 #define KD          0.0f          /* 微分系数(未使用) */
 #define DEAD_ZONE   3             /* 位置死区: ±3 内不调 */
-#define LOST_MS     200           /* 丢线超时 ms */
-#define TURN_TARGET 100.0f        /* 直角目标角度 (度) */
+#define LOST_MS     500           /* 丢线超时 ms */
+#define TURN_TARGET 90.0f        /* 直角目标角度 (度) */
 #define TURN_TIMEOUT 1500         /* 直角超时保护 ms */
 #define TURN_SPEED_H 1500         /* 直角转弯 PWM */
 #define STEER_SLEW_STEP 55        /* 5ms 内最大转向变化，提高响应速度 */
 #define TURN_COOLDOWN_TICKS 40    /* 直角退出后冷却 200ms，防止二次触发 */
 
-static volatile float   g_KP         = 1.6f;   /* 位置比例，提高响应速度 */
+static volatile float   g_KP         = 2.0f;   /* 位置比例，提高响应速度 */
 static volatile float   g_KI         = 0.05f;   /* 位置积分 */
 static volatile int16_t g_BASE_PWM   = 650;    /* 直行基准 PWM */
 static volatile int16_t g_TURN_SPEED = 650;    /* 蓝牙可调转弯速度 */
@@ -116,8 +116,8 @@ void CTRL_TIMER_INST_IRQHandler(void)
         /* 加权连续位置: 外层权重高 → 更细腻, 不会蹦 100 一跳 */
         int8_t s[8]; uint8_t i;
         for (i = 0; i < 8; i++) s[i] = (raw >> i) & 1;
-        int16_t pos = ( 160)*s[0] + (100)*s[1] + ( 55)*s[2] + ( 30)*s[3]
-                    + (-30)*s[4] + (-55)*s[5] + (-100)*s[6] + (-160)*s[7];
+        int16_t pos = ( 200)*s[0] + (140)*s[1] + ( 75)*s[2] + ( 40)*s[3]
+                    + (-40)*s[4] + (-75)*s[5] + (-140)*s[6] + (-200)*s[7];
 
         int16_t steer = 0;
         int16_t base  = g_BASE_PWM;
@@ -147,8 +147,8 @@ void CTRL_TIMER_INST_IRQHandler(void)
             } else {
                 g_all_white_cnt = 0;  /* 看到线就重置 */
             }
-            /* 全白持续 750ms (150 ticks) → 开始转弯 */
-            if (g_all_white_cnt >= 150) {
+            /* 全白持续 800ms (160 ticks) → 开始转弯 */
+            if (g_all_white_cnt >= 160) {
                 st = g_pending_turn;
                 g_turn_ticks = 0;
                 g_accumulated_angle = 0;      /* 累计角度清零 */
@@ -208,8 +208,13 @@ void CTRL_TIMER_INST_IRQHandler(void)
             Motor_SetRightSpeed(base);
             steer = 0;
         } else {
-            /* NORMAL: 灰度 P 巡线，无滤波避免滞后超调 */
-            if (s[0] || s[1] || s[2] || s[3] || s[4] || s[5] || s[6] || s[7]) {
+            /* NORMAL: 灰度 P 巡线 */
+            bool all_white = (raw == 0);
+            bool all_black = (raw == 0xFF);
+            bool has_line = (s[0] || s[1] || s[2] || s[3] || s[4] || s[5] || s[6] || s[7]);
+
+            if (has_line && !all_black) {
+                /* 有线且非全黑: 正常巡线 */
                 int16_t pos_ctrl = pos;
                 if (pos_ctrl > -DEAD_ZONE && pos_ctrl < DEAD_ZONE) {
                     pos_ctrl = 0;
@@ -228,7 +233,7 @@ void CTRL_TIMER_INST_IRQHandler(void)
                 g_last_steer = steer;
                 g_lost_cnt   = 0;
             } else {
-                /* 丢线: 保持上次转向, 超时停车 */
+                /* 全白或全黑: 保持上次转向, 超时停车 */
                 steer = g_last_steer;
                 if (++g_lost_cnt > LOST_MS / 5) {
                     Motor_Stop(); steer = 0;
