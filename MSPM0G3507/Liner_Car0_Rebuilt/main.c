@@ -22,6 +22,7 @@
 #define TURN_SPEED_H 1500         /* 直角转弯 PWM */
 #define STEER_SLEW_STEP 75        /* 5ms 内最大转向变化，提高响应速度 */
 #define TURN_COOLDOWN_TICKS 40    /* 直角退出后冷却 200ms，防止二次触发 */
+#define TURN_FORWARD_PULSES 400   /* turn wait forward distance, encoder pulses */
 
 static volatile float   g_KP         = 1.8f;   /* 位置比例，中等响应 */
 static volatile float   g_KI         = 0.0f;   /* 位置积分，先关掉 */
@@ -62,6 +63,7 @@ static uint32_t   g_turn_cooldown;            /* 直角退出冷却计数 */
 static float      g_turn_start_yaw;           /* 直角起始航向 */
 static State_t    g_pending_turn;             /* 等待中的转弯方向 */
 static uint32_t   g_all_white_cnt;            /* 全白持续计数 */
+static int32_t    g_turn_start_l, g_turn_start_r; /* TURN_WAIT encoder start */
 static float      g_accumulated_angle;        /* 累计转角 (0~720+) */
 static float      g_last_yaw_for_accum;       /* 上次yaw，用于计算增量 */
 
@@ -136,27 +138,30 @@ void CTRL_TIMER_INST_IRQHandler(void)
                 State_t next = detect_turn(raw);
                 if (next != NORMAL) {
                     st = TURN_WAIT;
-                    g_pending_turn = next;        /* 记录转弯方向 */
+                    g_pending_turn = next;        /* record turn direction */
+                    g_turn_start_l = enc_l;
+                    g_turn_start_r = enc_r;
                     g_turn_ticks = 0;
+                    g_all_white_cnt = 0;
                 }
             }
         } else if (st == TURN_WAIT) {
-            /* 等待全白: 继续直行，全白持续 1000ms 后才开始转 */
+            /* Move forward a fixed encoder distance before starting the turn. */
             g_turn_ticks++;
-            if (raw == 0) {
-                g_all_white_cnt++;
-            } else {
-                g_all_white_cnt = 0;  /* 看到线就重置 */
-            }
-            /* 全白持续 800ms (160 ticks) → 开始转弯 */
-            if (g_all_white_cnt >= 160) {
+            int32_t dl = enc_l - g_turn_start_l;
+            int32_t dr = enc_r - g_turn_start_r;
+            if (dl < 0) dl = -dl;
+            if (dr < 0) dr = -dr;
+            int32_t forward_pulses = (dl + dr) / 2;
+
+            if (forward_pulses >= TURN_FORWARD_PULSES) {
                 st = g_pending_turn;
                 g_turn_ticks = 0;
-                g_accumulated_angle = 0;      /* 累计角度清零 */
-                g_last_yaw_for_accum = yaw;   /* 记录起始yaw */
+                g_accumulated_angle = 0;
+                g_last_yaw_for_accum = yaw;
                 g_all_white_cnt = 0;
             }
-            /* 超时保护: 等太久就直接转 */
+            /* Timeout fallback if encoder count is abnormal or the car is stuck. */
             if (g_turn_ticks > 300) {  /* 1500ms */
                 st = g_pending_turn;
                 g_turn_ticks = 0;
