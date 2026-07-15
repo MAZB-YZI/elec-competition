@@ -15,18 +15,18 @@
 #include "ir_sensor.h"
 
 /* ========== 默认参数 (蓝牙可改) ========== */
-#define KD          0.0f          /* 微分系数(未使用) */
+#define KD          0.6f          /* 微分系数，抑制摆动 */
 #define DEAD_ZONE   3             /* 位置死区: ±3 内不调 */
 #define LOST_MS     500           /* 丢线超时 ms */
 #define TURN_TARGET 90.0f        /* 直角目标角度 (度) */
 #define TURN_TIMEOUT 1500         /* 直角超时保护 ms */
 #define TURN_SPEED_H 1500         /* 直角转弯 PWM */
-#define STEER_SLEW_STEP 55        /* 5ms 内最大转向变化，提高响应速度 */
+#define STEER_SLEW_STEP 75        /* 5ms 内最大转向变化，提高响应速度 */
 #define TURN_COOLDOWN_TICKS 40    /* 直角退出后冷却 200ms，防止二次触发 */
 
-static volatile float   g_KP         = 2.0f;   /* 位置比例，提高响应速度 */
-static volatile float   g_KI         = 0.05f;   /* 位置积分 */
-static volatile int16_t g_BASE_PWM   = 650;    /* 直行基准 PWM */
+static volatile float   g_KP         = 1.8f;   /* 位置比例，中等响应 */
+static volatile float   g_KI         = 0.0f;   /* 位置积分，先关掉 */
+static volatile int16_t g_BASE_PWM   = 600;    /* 直行基准 PWM，降速防甩出 */
 static volatile int16_t g_TURN_SPEED = 650;    /* 蓝牙可调转弯速度 */
 static volatile int16_t g_OUTPUT_LIM = 1000;   /* 位置 PID 输出限幅 */
 
