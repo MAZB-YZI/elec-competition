@@ -10,7 +10,9 @@ MSPM0 串口协议 + 看门狗/相机自恢复 + 独立云台模式 + PC 主控�
 | `main.py` | 主程序:状态机、五个模式、触屏 UI、协议收发、WDT、自恢复 |
 | `proto.py` | 协议编解码(板端) |
 | `params.py` | 参数默认值 + `/root/ec_vision_params.json` 持久化 + 可调参数注册表 |
-| `gimbal.py` | 独立云台:A18(PWM6)=pitch、A19(PWM7)=yaw,增量式 PD |
+| `f32c.py` | 云台主驱动:WHEELTEC F32C 无刷总线电机(UART1/A30/A31), 协议移植自 MSPM0 参考工程 |
+| `gimbal.py` | 云台备用驱动:PWM 舵机(Drv=0 时启用), 增量式 PD |
+| `f32c_test.py` / `servo_test.py` | 云台隔离测试脚本(先于框架跑, 见 GIMBAL_WIRING.md) |
 | `PROTOCOL.md` | **今天就发给主控队友** |
 | `mspm0_ref/vision_uart.c` | 给队友的 C 参考解析器,可直接嵌入 MSPM0 工程 |
 | `host_sim/pc_host_sim.py` | 电脑冒充主控(USB-TTL),不等小车先打通协议闭环 |
@@ -33,8 +35,9 @@ MSPM0 串口协议 + 看门狗/相机自恢复 + 独立云台模式 + PC 主控�
   `TgtWcm` 填靶纸真实宽度(cm)后 unit 自动变 0.1cm(线性粗换算,D6 标定日换单应性)。
 - **DETECT**:默认模型 `/root/models/yolo11n.mud`;换自己的模型改 `params.py` 里
   `detect.model` 或直接编辑 `/root/ec_vision_params.json`。首次进入加载约几秒。
-- **GIMBAL**:独立云台自闭环(瞄 BLOB 阈值内最大色块到画面中心)。
-  舵机独立 5V 供电、与板共地;先把 Kp 从小往上加,方向反了切 InvX/InvY。
+- **GIMBAL**:云台视觉自闭环。Src=0 瞄最大色块, Src=1 瞄靶心(打靶题, 复用 TARGET 页检测参数)。
+  驱动 Drv=1 为 F32C 无刷电机(默认, 实际硬件), Drv=0 为 PWM 舵机备用。
+  接线/联调顺序/增益整定见 `GIMBAL_WIRING.md`;方向反了切 InvX/InvY。
   **比赛联调后控制权归主控,此模式只用于你单人验证。**
 
 ## 开机自启(封版日再做)

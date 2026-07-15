@@ -5,3 +5,7 @@
 !MSPM0G3507/
 !MSPM0G3507/Liner_Car0_Tom/
 !MSPM0G3507/Liner_Car0_Tom/**
+
+# Whitelist: ec_vision (MaixCAM2 vision framework)
+!ec_vision/
+!ec_vision/**

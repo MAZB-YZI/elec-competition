@@ -54,14 +54,22 @@ class Gimbal:
         self.last_ey = 0.0
 
     def update(self, err_x, err_y):
-        """err_x/err_y: 目标点相对画面中心的像素误差(右/下为正)。每帧调用一次。"""
+        """err_x/err_y: 目标点相对瞄准点的像素误差(右/下为正)。每帧调用一次。"""
         g = self.p.d["gimbal"]
+        dead = float(g.get("dead_px", 3))       # 死区: 误差小于此像素数就不动, 消除舵机抖振
+        if abs(err_x) <= dead:
+            err_x = 0.0
+        if abs(err_y) <= dead:
+            err_y = 0.0
         sx = -1.0 if g["inv_x"] else 1.0
         sy = -1.0 if g["inv_y"] else 1.0
         dx = g["kp"] * err_x + g["kd"] * (err_x - self.last_ex)
         dy = g["kp"] * err_y + g["kd"] * (err_y - self.last_ey)
         self.last_ex = err_x
         self.last_ey = err_y
+        ms = float(g.get("max_step", 0.25))     # 单帧占空比步进上限: 防大误差/重捕获时猛甩+电源跌落
+        dx = max(-ms, min(ms, dx))
+        dy = max(-ms, min(ms, dy))
         self.duty_yaw = self._clamp(self.duty_yaw + sx * dx)
         self.duty_pitch = self._clamp(self.duty_pitch + sy * dy)
         self.pwm_yaw.duty(self.duty_yaw)
@@ -71,3 +79,6 @@ class Gimbal:
         """无目标时保持当前位置并清微分,防止丢目标后猛甩。"""
         self.last_ex = 0.0
         self.last_ey = 0.0
+
+    def status_str(self):
+        return ""       # 与 F32CGimbal 接口对齐
