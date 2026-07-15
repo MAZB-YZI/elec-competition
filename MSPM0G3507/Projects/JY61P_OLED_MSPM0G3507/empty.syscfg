@@ -1,0 +1,80 @@
+/**
+ * JY61P + OLED 项目 SysConfig
+ * - OLED: I2C0 (PA28/PA31)
+ * - JY61P: UART0 (PA0/PA1)
+ * - LED: PB22
+ *
+ * @cliArgs --device "MSPM0G350X" --part "Default" --package "LQFP-64(PM)" --product "mspm0_sdk@2.10.00.04"
+ * @v2CliArgs --device "MSPM0G3507" --package "LQFP-64(PM)" --product "mspm0_sdk@2.10.00.04"
+ * @versions {"tool":"1.26.2"}
+ */
+
+const GPIO    = scripting.addModule("/ti/driverlib/GPIO", {}, false);
+const GPIO1   = GPIO.addInstance();
+const GPIO2   = GPIO.addInstance();
+const I2C     = scripting.addModule("/ti/driverlib/I2C", {}, false);
+const I2C1    = I2C.addInstance();
+const SYSCTL  = scripting.addModule("/ti/driverlib/SYSCTL");
+const SYSTICK = scripting.addModule("/ti/driverlib/SYSTICK");
+const UART    = scripting.addModule("/ti/driverlib/UART", {}, false);
+const UART1   = UART.addInstance();
+
+const Board = scripting.addModule("/ti/driverlib/Board", {}, false);
+
+/* OLED I2C0 (PA28/PA31) */
+I2C1.$name                             = "I2C_OLED";
+I2C1.basicEnableController             = true;
+I2C1.advDigitalGlitchFilter            = "CLOCKS_1";
+I2C1.advControllerRXFIFOTRIG           = "BYTES_8";
+I2C1.advControllerTXFIFOTRIG           = "BYTES_7";
+I2C1.peripheral.$assign                = "I2C0";
+I2C1.peripheral.sdaPin.$assign         = "PA28";
+I2C1.peripheral.sclPin.$assign         = "PA31";
+I2C1.sdaPinConfig.$name                = "ti_driverlib_gpio_GPIOPinGeneric0";
+I2C1.sdaPinConfig.enableConfig         = true;
+I2C1.sdaPinConfig.internalResistor     = "PULL_UP";
+I2C1.sclPinConfig.$name                = "ti_driverlib_gpio_GPIOPinGeneric1";
+I2C1.sclPinConfig.enableConfig         = true;
+I2C1.sclPinConfig.internalResistor     = "PULL_UP";
+
+/* JY61P UART0 (PA0/PA1) */
+UART1.$name                            = "UART_JY61P";
+UART1.targetBaudRate                   = 9600;
+UART1.enabledInterrupts                = ["RX"];
+UART1.interruptPriority                = "2";
+UART1.peripheral.$assign               = "UART0";
+UART1.peripheral.rxPin.$assign         = "PA1";
+UART1.peripheral.txPin.$assign         = "PA0";
+UART1.txPinConfig.direction            = scripting.forceWrite("OUTPUT");
+UART1.txPinConfig.hideOutputInversion  = scripting.forceWrite(false);
+UART1.txPinConfig.onlyInternalResistor = scripting.forceWrite(false);
+UART1.txPinConfig.passedPeripheralType = scripting.forceWrite("Digital");
+UART1.txPinConfig.$name                = "ti_driverlib_gpio_GPIOPinGeneric2";
+UART1.rxPinConfig.hideOutputInversion  = scripting.forceWrite(false);
+UART1.rxPinConfig.onlyInternalResistor = scripting.forceWrite(false);
+UART1.rxPinConfig.passedPeripheralType = scripting.forceWrite("Digital");
+UART1.rxPinConfig.$name                = "ti_driverlib_gpio_GPIOPinGeneric3";
+
+/* LED (PB22) */
+GPIO1.$name                            = "LED_STATUS";
+GPIO1.associatedPins[0].$name          = "LED";
+GPIO1.associatedPins[0].direction      = "OUTPUT";
+GPIO1.associatedPins[0].pin.$assign    = "PB22";
+
+/* Button (PB21) */
+GPIO2.$name                            = "KEY";
+GPIO2.associatedPins[0].$name          = "key";
+GPIO2.associatedPins[0].direction      = "INPUT";
+GPIO2.associatedPins[0].pin.$assign    = "PB21";
+
+SYSCTL.forceDefaultClkConfig = true;
+SYSCTL.clockTreeEn           = true;
+
+/* 禁用 SysConfig 的 SysTick */
+SYSTICK.periodEnable  = false;
+SYSTICK.systickEnable = false;
+SYSTICK.period        = 16777216;
+
+Board.peripheral.$suggestSolution          = "DEBUGSS";
+Board.peripheral.swclkPin.$suggestSolution = "PA20";
+Board.peripheral.swdioPin.$suggestSolution = "PA19";

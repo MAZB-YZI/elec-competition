@@ -1,0 +1,30 @@
+# Keil MDK build outputs
+*.o
+*.d
+*.axf
+*.htm
+*.hex
+*.map
+*.lst
+*.dep
+*.crf
+*.lnp
+*.sct
+*.tra
+*.htm
+*.build_log.htm
+JLinkLog.txt
+*.uvoptx
+
+# VS Code
+.vscode/
+*.log
+*.log.lock
+
+# OS
+Thumbs.db
+Desktop.ini
+~$*
+
+# RAR archives
+*.rar
