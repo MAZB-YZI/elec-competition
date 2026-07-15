@@ -1,0 +1,10 @@
+# Build output
+Debug/
+
+# Local AI/editor state
+.claude/
+.codex/
+.mcp.json
+
+# Backup files
+*.bak
