@@ -14,7 +14,7 @@
 #define WIT_FRAME_LEN       11
 
 /* 角度换算系数 */
-#define ANGLE_SCALE         0.01f   /* 原始值 × 0.01 = 度 */
+#define ANGLE_SCALE         (180.0f / 32768.0f)   /* 原始值 / 32768 * 180 = 度 */
 
 /* 接收状态机 */
 typedef enum {
