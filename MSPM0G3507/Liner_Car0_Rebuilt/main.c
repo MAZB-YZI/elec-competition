@@ -1,4 +1,4 @@
-﻿/**
+/**
  * main.c — PID 巡线 + L 形直角 + 蓝牙调参
  *
  * 状态: NORMAL / TURN_L / TURN_R
@@ -15,7 +15,6 @@
 #include "ir_sensor.h"
 
 /* ========== 默认参数 (蓝牙可改) ========== */
-#define KD          0.6f          /* 微分系数，抑制摆动 */
 #define DEAD_ZONE   3             /* 位置死区: ±3 内不调 */
 #define LOST_MS     500           /* 丢线超时 ms */
 #define TURN_TARGET 90.0f        /* 直角目标角度 (度) */
@@ -26,6 +25,7 @@
 
 static volatile float   g_KP         = 1.8f;   /* 位置比例，中等响应 */
 static volatile float   g_KI         = 0.0f;   /* 位置积分，先关掉 */
+static volatile float   g_KD         = 0.0f;   /* 位置微分，默认关闭 */
 static volatile int16_t g_BASE_PWM   = 600;    /* 直行基准 PWM，降速防甩出 */
 static volatile int16_t g_TURN_SPEED = 650;    /* 蓝牙可调转弯速度 */
 static volatile int16_t g_OUTPUT_LIM = 1000;   /* 位置 PID 输出限幅 */
@@ -52,6 +52,7 @@ static PID_t      g_pid;                 /* 位置 PID (外环) */
 static PID_t      g_heading_pid;         /* 航向 PID (中环) */
 static float      g_target_yaw;          /* 目标航向角 (度) */
 static int16_t    g_last_steer;          /* 上次转向量(丢线保持用) */
+static int16_t    g_last_pos_ctrl;       /* 上次位置误差，用于 D 项 */
 static uint32_t   g_lost_cnt;            /* 丢线持续计数 */
 static uint32_t   g_turn_ticks;          /* 转弯持续 5ms 计数 */
 static uint32_t   g_turn_confirm_ticks;  /* 直角退出确认计数 */
@@ -220,7 +221,9 @@ void CTRL_TIMER_INST_IRQHandler(void)
                     pos_ctrl = 0;
                 }
 
-                steer = (int16_t)(-(float)pos_ctrl * g_KP);
+                int16_t d_pos = pos_ctrl - g_last_pos_ctrl;
+                steer = (int16_t)(-((float)pos_ctrl * g_KP + (float)d_pos * g_KD));
+                g_last_pos_ctrl = pos_ctrl;
                 g_pos_filt = pos_ctrl;
                 if (steer >  lim) steer =  lim;
                 if (steer < -lim) steer = -lim;
@@ -234,6 +237,7 @@ void CTRL_TIMER_INST_IRQHandler(void)
                 g_lost_cnt   = 0;
             } else {
                 /* 全白或全黑: 保持上次转向, 超时停车 */
+                g_last_pos_ctrl = 0;
                 steer = g_last_steer;
                 if (++g_lost_cnt > LOST_MS / 5) {
                     Motor_Stop(); steer = 0;
@@ -263,7 +267,7 @@ int main(void)
     SYSCFG_DL_init();
     Motor_Init();
     OLED_Init();
-    PID_Init(&g_pid, g_KP, g_KI, KD, g_OUTPUT_LIM);
+    PID_Init(&g_pid, g_KP, g_KI, g_KD, g_OUTPUT_LIM);
     PID_Init(&g_heading_pid, HEADING_KP, HEADING_KI, HEADING_KD, HEADING_LIM);
     g_target_yaw = 0.0f;
     BT_Init();
@@ -289,7 +293,7 @@ int main(void)
             g_BASE_PWM   = bt_params.BASE_PWM;
             g_TURN_SPEED = bt_params.TURN_SPEED;
             g_OUTPUT_LIM = bt_params.OUTPUT_LIM;
-            PID_Init(&g_pid, g_KP, g_KI, KD, g_OUTPUT_LIM);
+            PID_Init(&g_pid, g_KP, g_KI, g_KD, g_OUTPUT_LIM);
         }
 
         /* OLED */
