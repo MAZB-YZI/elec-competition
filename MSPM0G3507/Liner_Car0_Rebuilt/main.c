@@ -18,7 +18,7 @@
 #define DEAD_ZONE   3             /* 位置死区: ±3 内不调 */
 #define LOST_MS     500           /* 丢线超时 ms */
 #define TURN_TARGET 90.0f        /* 直角目标角度 (度) */
-#define TURN_TIMEOUT 1500         /* 直角超时保护 ms */
+#define TURN_TIMEOUT 2000         /* 直角超时保护 ms */
 #define TURN_SPEED_H 1500         /* 直角转弯 PWM */
 #define STEER_SLEW_STEP 75        /* 5ms 内最大转向变化，提高响应速度 */
 #define TURN_COOLDOWN_TICKS 40    /* 直角退出后冷却 200ms，防止二次触发 */
