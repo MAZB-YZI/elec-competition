@@ -2,15 +2,28 @@
 #include "encoder.h"
 #include "line_sensor.h"
 #include "motor.h"
-#include "mpu6050.h"
+#include "jy61p.h"
 #include <math.h>
 
+/* ========== 速度环 PI ========== */
 typedef struct { float kp, ki, integral; } SpeedPI;
-static SpeedPI left_pi = {1200.0f, 400.0f, 0.0f};
-static SpeedPI right_pi = {1200.0f, 400.0f, 0.0f};
+static SpeedPI left_pi = {80.0f, 20.0f, 0.0f};
+static SpeedPI right_pi = {80.0f, 20.0f, 0.0f};
+
+/* ========== 航向环 PD ========== */
+static float heading_kp = 5.0f;
+static float heading_kd = 0.2f;
+static float heading_limit = 500.0f;
+
+/* ========== 循迹环 P ========== */
+static float line_kp = 300.0f;
+static float line_limit = 500.0f;
+
+/* ========== 内部状态 ========== */
 static MotionState state;
 static float target_distance, target_speed, target_yaw, last_heading_error;
 
+/* ========== 辅助函数 ========== */
 static float clamp(float value, float limit)
 { return value > limit ? limit : (value < -limit ? -limit : value); }
 
@@ -30,6 +43,27 @@ static void reset_controllers(void)
     last_heading_error = 0.0f;
 }
 
+/* ========== 参数调节接口 ========== */
+void Motion_SetSpeedGains(float kp, float ki)
+{
+    left_pi.kp = kp; left_pi.ki = ki;
+    right_pi.kp = kp; right_pi.ki = ki;
+}
+
+void Motion_SetHeadingGains(float kp, float kd, float limit)
+{
+    heading_kp = kp;
+    heading_kd = kd;
+    heading_limit = limit;
+}
+
+void Motion_SetLineGains(float kp, float limit)
+{
+    line_kp = kp;
+    line_limit = limit;
+}
+
+/* ========== 运动控制接口 ========== */
 void Motion_Init(void) { state = MOTION_IDLE; reset_controllers(); Motor_Stop(); }
 
 void Motion_DriveDistance(float metres, float speed_mps)
@@ -38,7 +72,7 @@ void Motion_DriveDistance(float metres, float speed_mps)
     reset_controllers();
     target_distance = fabsf(metres);
     target_speed = fabsf(speed_mps); /* H题只允许前进 */
-    target_yaw = MPU6050_GetYaw();
+    target_yaw = JY61P_GetYaw();
     state = MOTION_DISTANCE;
 }
 
@@ -64,11 +98,11 @@ void Motion_Update10ms(void)
     if (state == MOTION_LINE) {
         if (LineSensor_IsEndpoint()) { Motor_Stop(); state = MOTION_DONE; return; }
         if (!LineSensor_IsValid() || LineSensor_IsLost()) { Motor_Stop(); state = MOTION_FAULT; return; }
-        steering = clamp(900.0f * LineSensor_GetError(), 1400.0f);
+        steering = clamp(line_kp * LineSensor_GetError(), line_limit);
     } else {
-        float heading_error = target_yaw - MPU6050_GetYaw();
-        steering = clamp(25.0f * heading_error +
-            (heading_error - last_heading_error) / 0.01f, 1200.0f);
+        float heading_error = target_yaw - JY61P_GetYaw();
+        steering = clamp(heading_kp * heading_error +
+            heading_kd * (heading_error - last_heading_error) / 0.01f, heading_limit);
         last_heading_error = heading_error;
         if ((fabsf(travelled.left) + fabsf(travelled.right)) * 0.5f >= target_distance) {
             Motor_Stop(); state = MOTION_DONE; return;

@@ -1,0 +1,16 @@
+{
+  // 使用 IntelliSense 了解相关属性。 
+  // 悬停以查看现有属性的描述。
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Liner_Car0_Rebuilt",
+      "type": "ccs-debug",
+      "request": "launch",
+      "projectInfo": {
+        "name": "Liner_Car0_Rebuilt",
+        "resourceId": "/Liner_Car0_Rebuilt"
+      }
+    }
+  ]
+}

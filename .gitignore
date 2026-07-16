@@ -6,6 +6,15 @@
 !MSPM0G3507/Liner_Car0_Tom/
 !MSPM0G3507/Liner_Car0_Tom/**
 
+# Whitelist: Liner_Car0_Rebuilt project
+!MSPM0G3507/Liner_Car0_Rebuilt/
+!MSPM0G3507/Liner_Car0_Rebuilt/**
+
+# Whitelist: H_CAR project (2024 H题自动行驶小车)
+!MSPM0G3507/Projects/
+!MSPM0G3507/Projects/H_CAR_MSPM0G3507/
+!MSPM0G3507/Projects/H_CAR_MSPM0G3507/**
+
 # Whitelist: ec_vision (MaixCAM2 vision framework)
 !ec_vision/
 !ec_vision/**
