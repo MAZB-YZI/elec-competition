@@ -22,11 +22,13 @@
 #define TURN_SPEED_H 1500         /* 直角转弯 PWM */
 #define STEER_SLEW_STEP 75        /* 5ms 内最大转向变化，提高响应速度 */
 #define TURN_COOLDOWN_TICKS 40    /* 直角退出后冷却 200ms，防止二次触发 */
-#define TURN_FORWARD_PULSES 400   /* turn wait forward distance, encoder pulses */
-#define CONTROL_DT 0.005f         /* control loop period, seconds */
-#define SPEED_LOOP_ENABLE 0       /* 0=open-loop encoder test, 1=enable speed PID */
-#define SPEED_TARGET_SCALE 1.0f   /* PWM command to encoder speed setpoint scale */
-#define TURN_MIN_SPEED 420        /* minimum PWM while angle loop is active */
+#define TURN_FORWARD_PULSES 400   /* 转弯前前进编码器脉冲数 */
+#define CONTROL_DT 0.005f         /* 控制周期 5ms */
+#define LEFT_ENCODER_DIR   1      /* 左轮编码器方向系数 */
+#define RIGHT_ENCODER_DIR -1     /* 右轮编码器方向系数，右轮安装反向 */
+#define SPEED_LOOP_ENABLE 0       /* 0=开环测试编码器，1=启用速度PID */
+#define SPEED_TARGET_SCALE 1.0f   /* PWM指令到编码器速度设定值的比例 */
+#define TURN_MIN_SPEED 420        /* 角度环转弯时最低PWM */
 
 static volatile float   g_KP         = 1.8f;   /* 位置比例，中等响应 */
 static volatile float   g_KI         = 0.0f;   /* 位置积分，先关掉 */
@@ -41,13 +43,13 @@ static volatile int16_t g_OUTPUT_LIM = 1000;   /* 位置 PID 输出限幅 */
 #define HEADING_KD      0.0f
 #define HEADING_LIM     800     /* 航向 PID 输出限幅 */
 
-/* Wheel speed loop. Setpoints are derived from the final PWM request. */
+/* 车轮速度环参数，设定值由最终PWM指令推导 */
 #define SPEED_KP        0.25f
 #define SPEED_KI        0.05f
 #define SPEED_KD        0.0f
 #define SPEED_LIM       900
 
-/* 90-degree corner angle loop. */
+/* 90°直角转弯角度环参数 */
 #define TURN_ANGLE_KP   10.0f
 #define TURN_ANGLE_KI   0.0f
 #define TURN_ANGLE_KD   0.6f
@@ -55,7 +57,7 @@ static volatile int16_t g_OUTPUT_LIM = 1000;   /* 位置 PID 输出限幅 */
 
 /* 状态机 */
 typedef enum { NORMAL, TURN_WAIT, TURN_L, TURN_R } State_t;
-static int16_t g_pos_filt;              /* filtered line position */
+static int16_t g_pos_filt;              /* 滤波后的位置误差 */
 
 /* ISR ↔ main 共享 */
 static volatile uint8_t  g_raw;          /* 灰度原始 8-bit */
@@ -67,9 +69,9 @@ static volatile bool     g_new_data;     /* ISR 新数据标志 */
 
 static PID_t      g_pid;                 /* 位置 PID (外环) */
 static PID_t      g_heading_pid;         /* 航向 PID (中环) */
-static PID_t      g_speed_pid_l;         /* left wheel speed loop */
-static PID_t      g_speed_pid_r;         /* right wheel speed loop */
-static PID_t      g_turn_angle_pid;      /* right-angle turn loop */
+static PID_t      g_speed_pid_l;         /* 左轮速度环 */
+static PID_t      g_speed_pid_r;         /* 右轮速度环 */
+static PID_t      g_turn_angle_pid;      /* 直角转弯角度环 */
 static float      g_target_yaw;          /* 目标航向角 (度) */
 static int16_t    g_last_steer;          /* 上次转向量(丢线保持用) */
 static int16_t    g_last_pos_ctrl;       /* 上次位置误差，用于 D 项 */
@@ -77,12 +79,12 @@ static uint32_t   g_lost_cnt;            /* 丢线持续计数 */
 static uint32_t   g_turn_ticks;          /* 转弯持续 5ms 计数 */
 static uint32_t   g_turn_confirm_ticks;  /* 直角退出确认计数 */
 static int32_t    g_last_enc_l, g_last_enc_r; /* 编码器上次值 */
-static volatile int16_t g_speed_l, g_speed_r; /* 编码器速度 pulses/sec */
+static volatile int16_t g_speed_l, g_speed_r; /* 编码器速度 脉冲/秒 */
 static uint32_t   g_turn_cooldown;            /* 直角退出冷却计数 */
 static float      g_turn_start_yaw;           /* 直角起始航向 */
 static State_t    g_pending_turn;             /* 等待中的转弯方向 */
 static uint32_t   g_all_white_cnt;            /* 全白持续计数 */
-static int32_t    g_turn_start_l, g_turn_start_r; /* TURN_WAIT encoder start */
+static int32_t    g_turn_start_l, g_turn_start_r; /* 转弯等待编码器起始值 */
 static float      g_accumulated_angle;        /* 累计转角 (0~720+) */
 static float      g_last_yaw_for_accum;       /* 上次yaw，用于计算增量 */
 
@@ -176,11 +178,11 @@ void CTRL_TIMER_INST_IRQHandler(void)
     case DL_TIMER_IIDX_LOAD: {
         JY61P_UpdateTick();
 
-        /* 编码器测速 */
+        /* 编码器测速（方向归一化：前进时都为正） */
         int32_t enc_l = Encoder_GetLeftCount();
         int32_t enc_r = Encoder_GetRightCount();
-        g_speed_l = (int16_t)((enc_l - g_last_enc_l) * 200);
-        g_speed_r = (int16_t)((enc_r - g_last_enc_r) * 200);
+        g_speed_l = (int16_t)((enc_l - g_last_enc_l) * 200 * LEFT_ENCODER_DIR);
+        g_speed_r = (int16_t)((enc_r - g_last_enc_r) * 200 * RIGHT_ENCODER_DIR);
         g_last_enc_l = enc_l; g_last_enc_r = enc_r;
 
         uint8_t raw  = GraySensor_Read();
@@ -207,7 +209,7 @@ void CTRL_TIMER_INST_IRQHandler(void)
                 State_t next = detect_turn(raw);
                 if (next != NORMAL) {
                     st = TURN_WAIT;
-                    g_pending_turn = next;        /* record turn direction */
+                    g_pending_turn = next;        /* 记录转弯方向 */
                     g_turn_start_l = enc_l;
                     g_turn_start_r = enc_r;
                     g_turn_ticks = 0;
@@ -216,7 +218,7 @@ void CTRL_TIMER_INST_IRQHandler(void)
                 }
             }
         } else if (st == TURN_WAIT) {
-            /* Move forward a fixed encoder distance before starting the turn. */
+            /* 转弯前前进固定编码器距离 */
             g_turn_ticks++;
             int32_t dl = enc_l - g_turn_start_l;
             int32_t dr = enc_r - g_turn_start_r;
@@ -233,7 +235,7 @@ void CTRL_TIMER_INST_IRQHandler(void)
                 g_all_white_cnt = 0;
                 reset_motion_pids();
             }
-            /* Timeout fallback if encoder count is abnormal or the car is stuck. */
+            /* 超时保护：编码器异常或车辆卡住时 */
             if (g_turn_ticks > 300) {  /* 1500ms */
                 st = g_pending_turn;
                 g_turn_ticks = 0;
@@ -245,7 +247,7 @@ void CTRL_TIMER_INST_IRQHandler(void)
             }
         } else {
             g_turn_ticks++;
-            /* Accumulate yaw delta every 5 ms so wraparound at +/-180 deg is safe. */
+            /* 每5ms累加yaw变化量，处理±180°跳变 */
             float turned = yaw_diff(yaw, g_last_yaw_for_accum);
             g_last_yaw_for_accum = yaw;
             if (turned < 0) turned = -turned;
@@ -413,11 +415,12 @@ int main(void)
                                : (st == TURN_WAIT) ? "WAIT"
                                : (st == TURN_L)    ? "TL  " : "TR  ";
                 OLED_ShowString(0, 18, ss, 12);
-                if (pos >= 0) OLED_ShowNum(36, 18, pos, 3, 12);
-
-                /* IR 测距值 */
-                OLED_ShowString(56, 18, "IR:", 12);
-                OLED_ShowNum(74, 18, IR_Read(), 4, 12);
+                /* 显示累计圈数 */
+                uint32_t turns_x10 = (uint32_t)((g_accumulated_angle * 10.0f) / 360.0f);
+                OLED_ShowString(36, 18, "R:", 12);
+                OLED_ShowNum(48, 18, turns_x10 / 10, 1, 12);
+                OLED_ShowString(56, 18, ".", 12);
+                OLED_ShowNum(62, 18, turns_x10 % 10, 1, 12);
 
                 int32_t speed_diff = (int32_t)g_speed_l - (int32_t)g_speed_r;
                 OLED_ShowString(0, 38, "L", 12);
@@ -425,26 +428,13 @@ int main(void)
                 OLED_ShowString(56, 38, "R", 12);
                 OLED_ShowSigned4(64, 38, g_speed_r);
                 
-                /* Yaw: 转弯时显示累计角度，否则显示实时航向 */
+                /* 底行: 始终显示速度差和航向 */
                 float yaw = g_yaw;
-                if (st == TURN_L || st == TURN_R) {
-                    /* 转弯中: 显示累计角度和总圈数 */
-                    uint32_t angle_deg = (uint32_t)g_accumulated_angle;
-                    uint32_t turns_x10 = (uint32_t)((g_accumulated_angle * 10.0f) / 360.0f);
-                    OLED_ShowString(0, 52, "A:", 12);
-                    OLED_ShowNum(14, 52, angle_deg, 4, 12);
-                    OLED_ShowString(50, 52, "R:", 12);
-                    OLED_ShowNum(64, 52, turns_x10 / 10, 2, 12);
-                    OLED_ShowString(82, 52, ".", 12);
-                    OLED_ShowNum(88, 52, turns_x10 % 10, 1, 12);
-                } else {
-                    /* 正常巡线: 显示左右轮速度差 */
-                    OLED_ShowString(0, 52, "D", 12);
-                    OLED_ShowSigned4(8, 52, speed_diff);
-                    OLED_ShowString(64, 52, "Y", 12);
-                    int32_t yaw_int = (int32_t)(yaw * 10);
-                    OLED_ShowSigned4(72, 52, yaw_int / 10);
-                }
+                OLED_ShowString(0, 52, "D", 12);
+                OLED_ShowSigned4(8, 52, speed_diff);
+                OLED_ShowString(64, 52, "Y", 12);
+                int32_t yaw_int = (int32_t)(yaw * 10);
+                OLED_ShowSigned4(72, 52, yaw_int / 10);
 
                 OLED_Refresh();
             }
