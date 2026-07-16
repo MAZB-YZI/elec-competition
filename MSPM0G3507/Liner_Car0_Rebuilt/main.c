@@ -85,8 +85,10 @@ static float      g_turn_start_yaw;           /* 直角起始航向 */
 static State_t    g_pending_turn;             /* 等待中的转弯方向 */
 static uint32_t   g_all_white_cnt;            /* 全白持续计数 */
 static int32_t    g_turn_start_l, g_turn_start_r; /* 转弯等待编码器起始值 */
-static float      g_accumulated_angle;        /* 累计转角 (0~720+) */
+static float      g_accumulated_angle;        /* 当前转弯累计角度 */
 static float      g_last_yaw_for_accum;       /* 上次yaw，用于计算增量 */
+static float      g_total_angle;              /* 全局累计角度，持续累加不清零 */
+static float      g_last_yaw_for_total;       /* 上次yaw，用于全局累计 */
 
 /* ================================================================
  *  辅助
@@ -199,6 +201,11 @@ void CTRL_TIMER_INST_IRQHandler(void)
         int16_t lim   = g_OUTPUT_LIM;
         float   yaw   = JY61P_GetYaw();
 
+        /* 全局累计角度：每5ms累加yaw变化，用于计算总圈数 */
+        float total_delta = yaw_diff(yaw, g_last_yaw_for_total);
+        g_last_yaw_for_total = yaw;
+        g_total_angle += total_delta;
+
         /* ---- 状态机: 直角检测 ---- */
         State_t st = g_state;
         if (st == NORMAL) {
@@ -258,12 +265,14 @@ void CTRL_TIMER_INST_IRQHandler(void)
             /* 超时保护: 防止卡死 */
             bool timeout = (g_turn_ticks > (TURN_TIMEOUT / 5));
 
-            /* 传感器退出: 扫到对面线就停 */
+            /* 传感器退出: 转够60°后扫到对面线才停 */
             bool sensor_exit = false;
-            if (st == TURN_R && black(raw, 1))  /* 右转: 左边第二个看到黑线 */
-                sensor_exit = true;
-            if (st == TURN_L && black(raw, 6))  /* 左转: 右边第二个看到黑线 */
-                sensor_exit = true;
+            if (g_accumulated_angle > 60.0f) {
+                if (st == TURN_R && black(raw, 1))  /* 右转: 左边第二个看到黑线 */
+                    sensor_exit = true;
+                if (st == TURN_L && black(raw, 6))  /* 左转: 右边第二个看到黑线 */
+                    sensor_exit = true;
+            }
 
             if (angle_done || timeout || sensor_exit) {
                 st = NORMAL;
@@ -366,6 +375,8 @@ int main(void)
     PID_Init(&g_speed_pid_r, SPEED_KP, SPEED_KI, SPEED_KD, SPEED_LIM);
     PID_Init(&g_turn_angle_pid, TURN_ANGLE_KP, TURN_ANGLE_KI, TURN_ANGLE_KD, TURN_ANGLE_LIM);
     g_target_yaw = 0.0f;
+    g_total_angle = 0.0f;
+    g_last_yaw_for_total = JY61P_GetYaw();  /* 记录初始航向 */
     BT_Init();
     JY61P_Init();
     BT_Send("LinerCar Ready\r\n");
@@ -415,12 +426,13 @@ int main(void)
                                : (st == TURN_WAIT) ? "WAIT"
                                : (st == TURN_L)    ? "TL  " : "TR  ";
                 OLED_ShowString(0, 18, ss, 12);
-                /* 显示累计圈数 */
-                uint32_t turns_x10 = (uint32_t)((g_accumulated_angle * 10.0f) / 360.0f);
+                /* 显示全局累计圈数（陀螺仪持续累加） */
+                uint32_t total_turns_x10 = (uint32_t)((g_total_angle * 10.0f) / 360.0f);
+                if (g_total_angle < 0) total_turns_x10 = (uint32_t)((-g_total_angle * 10.0f) / 360.0f);
                 OLED_ShowString(36, 18, "R:", 12);
-                OLED_ShowNum(48, 18, turns_x10 / 10, 1, 12);
+                OLED_ShowNum(48, 18, total_turns_x10 / 10, 1, 12);
                 OLED_ShowString(56, 18, ".", 12);
-                OLED_ShowNum(62, 18, turns_x10 % 10, 1, 12);
+                OLED_ShowNum(62, 18, total_turns_x10 % 10, 1, 12);
 
                 int32_t speed_diff = (int32_t)g_speed_l - (int32_t)g_speed_r;
                 OLED_ShowString(0, 38, "L", 12);
