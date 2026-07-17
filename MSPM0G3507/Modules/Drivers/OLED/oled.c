@@ -6,6 +6,8 @@
 
 /* ========== 显存缓冲区 ========== */
 uint8_t OLED_GRAM[OLED_WIDTH][OLED_PAGES];
+static uint8_t OLED_Dirty;       /* bit p = 第 p 页有变化 */
+static uint8_t OLED_First = 1;   /* 首次刷新全屏 */
 
 /* ========== I2C 底层驱动 ========== */
 static void OLED_WR_Byte(uint8_t dat, uint8_t mode)
@@ -68,19 +70,25 @@ void OLED_DisPlay_Off(void)
 
 void OLED_Refresh(void)
 {
+    uint8_t mask = OLED_First ? 0xFF : OLED_Dirty;
+    OLED_First = 0;
+    OLED_Dirty = 0;
+
     for (uint8_t p = 0; p < OLED_PAGES; p++) {
-        OLED_WR_Byte(0xB0 + p, OLED_CMD);  // 设置行起始地址
-        OLED_WR_Byte(0x00, OLED_CMD);      // 设置低列起始地址
-        OLED_WR_Byte(0x10, OLED_CMD);      // 设置高列起始地址
-        for (uint8_t n = 0; n < OLED_WIDTH; n++) {
+        if (!(mask & (1 << p))) continue;
+        OLED_WR_Byte(0xB0 + p, OLED_CMD);
+        OLED_WR_Byte(0x00, OLED_CMD);
+        OLED_WR_Byte(0x10, OLED_CMD);
+        for (uint8_t n = 0; n < OLED_WIDTH; n++)
             OLED_WR_Byte(OLED_GRAM[n][p], OLED_DATA);
-        }
     }
 }
 
 void OLED_Clear(void)
 {
     memset(OLED_GRAM, 0x00, sizeof(OLED_GRAM));
+    OLED_Dirty = 0xFF;
+    OLED_First = 1;
     OLED_Refresh();
 }
 
@@ -88,13 +96,17 @@ void OLED_Clear(void)
 void OLED_DrawPoint(uint8_t x, uint8_t y)
 {
     if (x >= OLED_WIDTH || y >= OLED_HEIGHT) return;
-    OLED_GRAM[x][y / 8] |= (1 << (y % 8));
+    uint8_t pg = y / 8;
+    OLED_GRAM[x][pg] |= (1 << (y % 8));
+    OLED_Dirty |= (1 << pg);
 }
 
 void OLED_ClearPoint(uint8_t x, uint8_t y)
 {
     if (x >= OLED_WIDTH || y >= OLED_HEIGHT) return;
-    OLED_GRAM[x][y / 8] &= ~(1 << (y % 8));
+    uint8_t pg = y / 8;
+    OLED_GRAM[x][pg] &= ~(1 << (y % 8));
+    OLED_Dirty |= (1 << pg);
 }
 
 void OLED_DrawLine(uint8_t x1, uint8_t y1, uint8_t x2, uint8_t y2)

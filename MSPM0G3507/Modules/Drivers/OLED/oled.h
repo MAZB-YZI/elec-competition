@@ -4,6 +4,9 @@
 #include "ti_msp_dl_config.h"
 #include <stdint.h>
 
+/* 适配 syscfg: 仓库用 OLED_INST → 映射到系统生成的 I2C_BUS_INST */
+#define OLED_INST I2C_BUS_INST
+
 /* ========== 基本参数 ========== */
 #define OLED_WIDTH        128
 #define OLED_HEIGHT       64
