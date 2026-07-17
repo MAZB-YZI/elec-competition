@@ -7,7 +7,7 @@
 #define DIAGONAL_M       1.280625f
 #define STRAIGHT_SPEED   0.30f
 #define DIAGONAL_SPEED   0.28f
-#define LINE_SPEED       0.22f
+#define ARC_LENGTH_M     1.2566f  /* 半圆弧长 π×0.4m */
 
 typedef enum { SEG_STRAIGHT, SEG_DIAGONAL, SEG_LINE } SegmentType;
 typedef struct { SegmentType type; } Segment;
@@ -24,7 +24,7 @@ static void start_segment(void)
     switch(segments[segment_index].type){
     case SEG_STRAIGHT: Motion_DriveDistance(STRAIGHT_M,STRAIGHT_SPEED); break;
     case SEG_DIAGONAL: Motion_DriveDistance(DIAGONAL_M,DIAGONAL_SPEED); break;
-    case SEG_LINE: Motion_FollowLine(LINE_SPEED); break;
+    case SEG_LINE: Motion_FollowLineDistance(0.0f, ARC_LENGTH_M * 0.95f); break;
     }
 }
 

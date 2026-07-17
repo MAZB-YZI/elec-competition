@@ -1,131 +1,103 @@
 # H_CAR_MSPM0G3507 自动行驶小车
 
-对应 2024 年全国大学生电子设计竞赛模拟电子系统专题赛 H 题“自动行驶小车”。当前主控为 TI MSPM0G3507，开发板为立创·天猛星 MSPM0G3507。
+2024 年全国大学生电子设计竞赛 H 题"自动行驶小车"。主控 TI MSPM0G3507，开发板为立创·天猛星 MSPM0G3507。
+
+## 项目结构
+
+```text
+include/                公共头文件
+src/control/            运动控制（control.c）与路线状态机（route_fsm.c）
+src/drivers/            板级适配：电机、编码器、灰度、陀螺仪、蜂鸣器、蓝牙
+main.c                  测试入口（宏切换测试模式）
+empty.syscfg            SysConfig 配置文件
+```
+
+## 测试模式
+
+通过 `main.c` 开头的宏切换：
+
+| 宏 | 功能 |
+|---|---|
+| `TEST_SPEED_LOOP` | 定速直行测试（速度环 PID） |
+| `TEST_DIST_MODE` | 定距 1 米直行停车（A→B 模拟） |
+| `TEST_LINE_MODE` | 半圆弧循迹测试（灰度 + 蓝牙调参） |
+
+## 引脚分配
+
+| 功能 | 引脚 | SysConfig 宏 |
+|---|---|---|
+| 左电机 PWM | PA12 | `PWM_MOTOR_C0` |
+| 右电机 PWM | PA13 | `PWM_MOTOR_C1` |
+| 左电机方向 | PB17 (DIR1), PB19 (DIR2) | `MOTOR_DIR_L`, `MOTOR_DIR_L2` |
+| 右电机方向 | PA16 (DIR1), PB24 (DIR2) | `MOTOR_DIR_R`, `MOTOR_DIR_R2` |
+| 左编码器 A/B | PA26 / PA27 | `ENCODER1_A`, `ENCODER1_B` |
+| 右编码器 A/B | PA25 / PA14 | `ENCODER2_A`, `ENCODER2_B` |
+| 灰度 CLK/DAT | PB6 / PB7 | `GRAY_SENSOR` |
+| JY61P 陀螺仪 | UART0, PA0(TX) / PA1(RX) | `UART_JY61P` |
+| HC-05 蓝牙 | UART3, PB2(TX) / PB3(RX) | `UART_BT` |
+| OLED | I2C0, PA28(SDA) / PA31(SCL) | `I2C_OLED` |
+| 蜂鸣器 | PA7 | `BUZZER`（低电平有效） |
+| LED 状态灯 | PB22 | `LED_STATUS` |
+| UART 调试 | UART1, PB6(TX) / PB7(RX) | `UART_DEBUG` |
+
+## 控制架构
+
+### 控制模式
+
+| 模式 | 活跃的环 | 说明 |
+|---|---|---|
+| MOTION_LINE（循迹） | 1个：循迹 PD | 固定 PWM + 转向，参考 Liner_Car0_Rebuilt |
+| MOTION_DISTANCE（直行） | 2个：速度 PI + 航向 PD | 编码器测距 + JY61P 保持直线 |
+| MOTION_HEADING（定航向） | 2个：速度 PI + 航向 PD | 指定目标航向 |
+
+### 循迹算法
+
+完全移植自 `Liner_Car0_Rebuilt`：
+
+- **加权位置**：`200*s[0] + 140*s[1] + 75*s[2] + 40*s[3] - 40*s[4] - 75*s[5] - 140*s[6] - 200*s[7]`
+- **死区**：±3
+- **PD 控制**：KP=1.8, KD=0.0
+- **转向限速**：75/周期
+- **输出**：`steer = -(KP×pos + KD×d_pos)`，范围 -1000~+1000
+
+### 蓝牙调参（HC-05, 38400 波特率）
+
+| 命令 | 功能 | 示例 |
+|---|---|---|
+| `hello` | 通信测试 | 返回 `receive:hello` |
+| `SHOW` | 显示当前参数 | `LKP=1.80 LKD=0.00 BASE=600 HKP=1 SKP=1500` |
+| `LKP x.x` | 设置循迹比例系数 | `LKP 1.5` |
+| `LKD x.x` | 设置微分系数 | `LKD 0.1` |
+| `BASE xxxx` | 设置循迹基准 PWM | `BASE 500` |
+| `HKP xxxx` | 设置航向环比例系数 | `HKP 2` |
+| `SKP xxxx` | 设置速度环比例系数 | `SKP 1000` |
+
+手机 APP 需支持 ASCII 发送，不需要自动加换行符（代码有 200ms 超时处理）。
+
+## 路线参数
+
+| 段 | 类型 | 距离 |
+|---|---|---|
+| A→B / C→D | 直线 | 1.000 m |
+| A→C / B→D | 对角线 | 1.280625 m |
+| B→C / D→A / C→B | 半圆弧 | 弧长 1.2566 m（半径 0.40 m） |
+
+## 共享模块依赖
+
+| 模块 | 路径 | 用途 |
+|---|---|---|
+| Encoder | `Modules/Drivers/Encoder/` | 编码器计数 + 方向归一化 |
+| GraySensor | `Modules/Drivers/GraySensor/` | 8 路灰度串行移位读取 |
+| Buzzer | `Modules/Drivers/Buzzer/` | 蜂鸣器定时控制 |
+| JY61P | `Modules/Drivers/JY61P/` | UART 陀螺仪解析 |
+| MPU6050 | `Modules/Drivers/MPU6050/` | 软件 I2C 陀螺仪（备用） |
+| PID | `Modules/Control/` | PID 控制器 |
+| Bluetooth | `Modules/Drivers/Bluetooth/` | 通用蓝牙 UART 基础设施 |
 
 ## 开发约束
 
-- 本工程优先复用仓库 `Modules/` 下已有代码，不从 0 重写已有驱动。
-- 可复用驱动的真实实现应放在 `Modules/Drivers/`；项目目录只保留板级适配、应用调度、测试入口和路线逻辑。
-- 如果已有模块不符合实际硬件，以“修改共享模块 + 项目板级适配文件”的方式处理，避免复制一份同名私有驱动。
-- `Modules/Drivers/F32C_MOTOR` 是已完成的云台无刷电机驱动，不属于本小车工程；没有用户明确同意时不要修改，也不要加入 H_CAR 编译。
-- 灰度传感器由队友实现，本工程只依赖抽象接口，不假设 ADC/GPIO/串口/数据格式。
-- `.syscfg`、`ti_msp_dl_config.c/h`、`.project`、`.cproject`、`.ccsproject` 和 `Debug/Release` 生成物必须通过 CCS/SysConfig/CCS Project 工具维护，不手工改。
-- 硬件验证必须逐步报告：源码检查、SysConfig 检查、CCS 编译、烧录、实物行为是不同结论。
-
-## 当前源码结构
-
-```text
-empty.c                 当前恢复安全入口：只闪烁 PB22 板载 LED
-include/                H_CAR 公共接口和模块转发头
-src/app/                初始化、安全状态、自测试入口与周期调度
-src/control/            运动控制与路线状态机
-src/drivers/            H_CAR 板级适配文件、编码器、蜂鸣器、灰度接口桩、模块桥接文件
-tests/                  PC 单元测试，不加入 CCS 正式目标
-```
-
-当前 `motor.c` 和 `mpu6050.c` 是临时 CCS 桥接文件：
-
-- `src/drivers/motor.c` 编译 `Modules/Drivers/DC_MOTOR/motor.c`
-- `include/motor.h` 转发到 `Modules/Drivers/DC_MOTOR/motor.h`
-- `src/drivers/mpu6050.c` 编译 `Modules/Drivers/MPU6050/mpu6050.c`
-- `include/mpu6050.h` 转发到 `Modules/Drivers/MPU6050/mpu6050.h`
-
-这样做是为了在不手工编辑 `.cproject` 的前提下，让 H_CAR 先复用共享模块。后续应在 CCS GUI 中把这些桥接文件替换为正式 linked source/include path。
-
-## 已确认引脚
-
-| 功能 | 引脚 |
-|---|---|
-| Motor1 PWMA / AIN1 / AIN2 | PA12 / PB17 / PB19 |
-| Motor1 Encoder A / B | PA25 / PA14 |
-| Motor2 PWMB / BIN1 / BIN2 | PA13 / PA16 / PB24 |
-| Motor2 Encoder A / B | PA26 / PA27 |
-| OLED 硬件 I2C0 SDA / SCL | PA28 / PA31 |
-| MPU6050 软件 I2C SDA / SCL | PA0 / PA1 |
-| MPU6050 INT | PB4，可选 |
-| Buzzer | PA7 |
-| 声光提示 LED | PB22，开发板板载 LED |
-
-TB6612 STBY 固定接高电平，不占 MCU 引脚。PA16 不再作为旋钮 ADC，PA27 不再作为舵机 PWM。TB6612 逻辑电平按模块确认可接受 0-5 V，但 I2C 上拉必须保持 3.3 V，不能把 MSPM0 引脚拉到 5 V。
-
-注意：扩展板 OLED 接口和 MPU6050 接口不是同一对物理 I2C 线。OLED 座使用 PA28/PA31，MPU6050 座使用 PA0/PA1；二者虽然都可作为 I2C0 复用引脚，但同一个硬件 I2C0 只能选择其中一组。正式小车工程不飞线：OLED 使用硬件 I2C0，MPU6050 保持 PA0/PA1 并改用软件 I2C。PA0/PA1 在正式工程中应作为 GPIO 管理，不得再配置为 I2C0 外设引脚。
-
-## 路线目标
-
-- 测试 1：A→B，直线 1.00 m，5 s 内停车。
-- 测试 2：A→B 直线、B→C 右半圆、C→D 直线、D→A 左半圆，30 s 内一圈。
-- 测试 3：A→C 对角线、C→B 右半圆、B→D 对角线、D→A 左半圆，40 s 内一圈。
-- 测试 4：按测试 3 连续运行 4 圈。
-
-几何参数：半圆半径 0.40 m，弧长约 1.2566 m；A-B/C-D 为 1.00 m；A-C/B-D 对角线约 1.280625 m。小车只允许前进，不得后退或使用原地反向差速转向。
-
-## 软件接口分层
-
-`hcar_hal.h` 是项目和硬件的边界，也就是“板级适配文件”的接口。共享模块不得直接依赖 H_CAR 的 SysConfig 宏，而是通过平台 hook 访问硬件：
-
-- DC motor 模块调用 `Motor_PlatformSetDirection()` / `Motor_PlatformSetDuty()`。
-- MPU6050 模块调用 `MPU6050_PlatformWrite()` / `MPU6050_PlatformWriteRead()`。
-- H_CAR 的 `hcar_hal.c` 负责把这些 hook 映射到当前 SysConfig 生成的 GPIO/I2C/PWM 宏。
-
-推荐调度周期：
-
-- 1 ms：`Buzzer_Update1ms()`
-- 5 ms：`MPU6050_Update(0.005f)`
-- 10 ms：`Encoder_Update(0.01f)`、`Motion_Update10ms()`、`Route_Update()`
-
-灰度队友实现以下接口即可：
-
-- `LineSensor_GetError()`
-- `LineSensor_IsValid()`
-- `LineSensor_IsEndpoint()`
-- `LineSensor_IsLost()`
-
-默认灰度桩会报告无效/丢线，进入半圆循迹阶段时应安全停机。
-
-## 测试进度
-
-| 模块 | 状态 | 说明 |
-|------|------|------|
-| LED (PB22) | ✅ 完成 | 250ms 闪烁正常 |
-| 蜂鸣器 (PA7) | ✅ 完成 | 低电平触发，控制正常 |
-| GPIO 输出 | ✅ 完成 | PB17/PB19/PA16/PB24 电平正常 |
-| OLED 显示 | ✅ 完成 | 硬件 I2C0 (PA28/PA31)，显示正常 |
-| 电机 PWM | ✅ 完成 | TIMG0 PA12/PA13 PWM 输出，电机转动 |
-| 编码器 | ✅ 完成 | PA25/PA14 (Motor1), PA26/PA27 (Motor2)，AB 相正常 |
-| MPU6050 | ✅ 完成 | 软件 I2C (PA0/PA1)，WHO_AM_I=0x68，加速度数据正常 |
-| OLED + MPU6050 同时工作 | ✅ 完成 | 两路 I2C 互不干扰 |
-
-### 测试结论
-
-1. **OLED 使用硬件 I2C0 (PA28/PA31)** - 稳定可靠
-2. **MPU6050 使用软件 I2C (PA0/PA1)** - 因为 PA0/PA1 只能作为 I2C0，与 OLED 的 PA28/PA31 冲突，所以用软件 I2C
-3. **正式方案不飞线** - OLED 硬件 I2C0，MPU6050 软件 I2C，风险集中在代码层
-4. **TB6612 STBY 固定接 5V** - 不占 MCU 引脚
-5. **编码器 5V 供电** - MSPM0 GPIO 支持 5V Tolerant，可直接接收
-
-### 遗留问题
-
-- **电机 PWM 需要配置** - 当前 SysConfig 未配置 PA12/PA13 为 PWM 输出，需要手动配置
-- **编码器中断** - 已配置 PA25/PA26 输入中断，需要在正式代码中启用
-- **MPU6050 校准** - 需要在正式代码中添加零偏校准
-
-## 测试顺序
-
-当前已验证：Factory Reset 恢复后，安全版 `empty.c` 可下载，PB22 板载 LED 正常闪烁。
-
-后续不要一次性烧完整路线程序，按以下顺序逐步启用：
-
-1. ✅ LED/GPIO：PB22 闪烁。
-2. ✅ 蜂鸣器：PA7 短响，先不进入运动控制。
-3. ✅ 电机方向 GPIO：车轮架空或断开电机电源，仅测 AIN/BIN 电平。
-4. ✅ PWM：PA12/PA13 低占空比输出，车轮架空。
-5. ✅ 编码器：只读 A/B 相计数，不开闭环。
-6. ✅ I2C/MPU6050：先 WHO_AM_I，再校准零偏和 yaw 积分。
-7. 1 ms tick 和控制环：确认所有 handler 存在且 ISR 短小后再启用。
-8. 路线状态机：先直线，再半圆接口，最后四圈。
-
-## 当前注意事项
-
-- `empty.c` 目前是恢复安全入口，不启动 H_CAR 调度。
-- 当前板级适配文件中 PWM duty 仍是占位逻辑；正式电机 PWM 需要通过 SysConfig/CCS Project 工具配置并生成正确宏后接入。
-- CCS 工程元数据中仍可能有旧工程名残留，不能手工改 `.cproject`；需要用 CCS 工程工具修正或重建工程。
+- 优先复用 `Modules/` 下已有代码，不从 0 重写。
+- `.syscfg`、`.project`、`.cproject` 通过 CCS/SysConfig 工具维护，不手工改。
+- H 题规则：只能前进，不能后退；不能遥控；不能用摄像头。
+- 灰度传感器引脚 PB6/PB7，极性：DAT 低电平 = 黑线 = bit1。
+- 蜂鸣器低电平有效，SysConfig 初始值 Set（高电平 = 不响）。

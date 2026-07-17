@@ -10,6 +10,8 @@ static int32_t last_right;
 static int32_t zero_left;
 static int32_t zero_right;
 static EncoderPair speed;
+static int left_dir = 1;   /* 方向系数：+1或-1 */
+static int right_dir = 1;
 
 static float count_to_m(int32_t count)
 {
@@ -26,6 +28,12 @@ void Encoder_Init(void)
     zero_right = 0;
     speed.left = 0.0f;
     speed.right = 0.0f;
+}
+
+void Encoder_SetDirection(int l_dir, int r_dir)
+{
+    left_dir = l_dir;
+    right_dir = r_dir;
 }
 
 void Encoder_OnLeftAEdge(void)
@@ -49,8 +57,8 @@ void Encoder_Update(float dt_s)
 
     l = left_count;
     r = right_count;
-    speed.left = count_to_m(l - last_left) / dt_s;
-    speed.right = count_to_m(r - last_right) / dt_s;
+    speed.left = count_to_m(l - last_left) * (float)left_dir / dt_s;
+    speed.right = count_to_m(r - last_right) * (float)right_dir / dt_s;
     last_left = l;
     last_right = r;
 }
@@ -69,8 +77,8 @@ EncoderPair Encoder_GetSpeed(void)
 EncoderPair Encoder_GetDistance(void)
 {
     EncoderPair v = {
-        count_to_m(left_count - zero_left),
-        count_to_m(right_count - zero_right)
+        count_to_m(left_count - zero_left) * (float)left_dir,
+        count_to_m(right_count - zero_right) * (float)right_dir
     };
     return v;
 }

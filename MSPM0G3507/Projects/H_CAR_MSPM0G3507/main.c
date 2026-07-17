@@ -16,16 +16,18 @@
 #include "buzzer.h"
 #include "jy61p.h"
 #include "control.h"
+#include "bluetooth.h"
+#include "line_sensor.h"
 #include "delay.h"
 
 /* ========== 测试模式选择（取消注释想要的模式） ========== */
 // #define TEST_SPEED_LOOP   /* 定速直行 */
-#define TEST_DIST_MODE      /* 定距1米停车 */
+// #define TEST_DIST_MODE    /* 定距1米停车 */
+#define TEST_LINE_MODE      /* 半圆弧循迹 */
 // #define TEST_HEADING_LOOP /* 航向保持 */
-// #define TEST_LINE_TURN    /* 循迹转弯 */
 
 /* ========== 路线参数（方便调参） ========== */
-#define LOOP_MS             10      /* 控制周期 ms */
+#define LOOP_MS             5       /* 控制周期 ms（参考 Liner_Car0_Rebuilt） */
 
 /* 直行段参数 */
 #define STRAIGHT_SPEED_MPS  0.40f   /* 直行速度 m/s */
@@ -41,10 +43,8 @@
 #define HEADING_KD          0.1f
 #define HEADING_LIM         200.0f
 
-/* 循迹环 P（弧线循迹用） */
-#define LINE_KP             300.0f
-#define LINE_LIM            500.0f
-#define LINE_SPEED_MPS      0.16f   /* 循迹速度 m/s */
+/* 循迹环（固定 PWM + 转向，PD 控制在 line_sensor.c 内部） */
+#define LINE_BASE_PWM       600     /* 基准 PWM */
 
 /* 弧线参数 */
 #define ARC_LENGTH_M        1.26f   /* 半圆弧长 π×0.4m */
@@ -260,7 +260,7 @@ int main(void)
     JY61P_Init();
 
     /* 等 JY61P 收到至少 50 帧（约 500ms 稳定数据） */
-    while (JY61P_GetFrameCount() < 50U) {
+    while (JY61P_GetFrameCount() < 30U) {
         OLED_ShowNum(0, 32, JY61P_GetFrameCount(), 4, 12);
         OLED_Refresh();
         delay_ms(50U);
@@ -271,7 +271,7 @@ int main(void)
     /* 设置控制参数 */
     Motion_SetSpeedGains(SPEED_KP, SPEED_KI);
     Motion_SetHeadingGains(HEADING_KP, HEADING_KD, HEADING_LIM);
-    Motion_SetLineGains(LINE_KP, LINE_LIM);
+    Motion_SetLineBasePWM(LINE_BASE_PWM);
 
     /* 启动运动 */
     OLED_Clear();
@@ -351,6 +351,173 @@ int main(void)
 }
 
 #endif /* TEST_DIST_MODE */
+
+/* ================================================================
+ *  TEST_LINE_MODE — 半圆弧循迹测试
+ *  灰度循迹 + 编码器弧长兜底
+ *  全白(丢线) → 停车 + 蜂鸣
+ * ================================================================ */
+#ifdef TEST_LINE_MODE
+
+int main(void)
+{
+    EncoderPair speed;
+    EncoderPair dist;
+    uint32_t last_loop_ms = 0U;
+    uint32_t last_display_ms = 0U;
+    uint32_t loop_count = 0U;
+    bool done = false;
+    uint32_t done_time = 0U;
+
+    /* 初始化 */
+    SYSCFG_DL_init();
+    Motor_Init();
+    Encoder_Init();
+    OLED_Init();
+    Buzzer_Init();
+
+    /* 启动编码器中断 */
+    DL_GPIO_clearInterruptStatus(GPIOA,
+        ENCODER1_A_ENC1_A_PIN | ENCODER2_A_ENC2_A_PIN);
+    DL_GPIO_enableInterrupt(GPIOA, ENCODER1_A_ENC1_A_PIN);
+    DL_GPIO_enableInterrupt(GPIOA, ENCODER2_A_ENC2_A_PIN);
+    NVIC_EnableIRQ(GPIOA_INT_IRQn);
+
+    /* 启动 1ms 定时器 */
+    NVIC_ClearPendingIRQ(SYS_TICK_INST_INT_IRQN);
+    NVIC_EnableIRQ(SYS_TICK_INST_INT_IRQN);
+
+    /* JY61P 初始化 */
+    OLED_Clear();
+    OLED_ShowString(0, 0, "LINE TEST", 12);
+    OLED_ShowString(0, 16, "WAIT JY61P...", 12);
+    OLED_Refresh();
+
+    JY61P_Init();
+    while (JY61P_GetFrameCount() < 30U) {
+        OLED_ShowNum(0, 32, JY61P_GetFrameCount(), 4, 12);
+        OLED_Refresh();
+        delay_ms(50U);
+    }
+    JY61P_ResetYaw();
+
+    /* 蓝牙初始化 */
+    BT_Init();
+    BT_SetTickPtr(&g_ms_ticks);
+    BT_Params_t init_params = {1.8f, 0.0f, 600, 1, 1500};
+    BT_SetParams(&init_params);
+    BT_Send("H_CAR BT Ready\r\n");
+
+    /* 设置控制参数 */
+    Motion_SetSpeedGains(SPEED_KP, SPEED_KI);
+    Motion_SetHeadingGains(HEADING_KP, HEADING_KD, HEADING_LIM);
+    Motion_SetLineBasePWM(LINE_BASE_PWM);
+
+    /* 启动循迹 */
+    OLED_Clear();
+    OLED_ShowString(0, 0, "LINE TEST", 12);
+    OLED_ShowString(0, 16, "FOLLOWING...", 12);
+    OLED_Refresh();
+
+    Motion_Init();
+    Motion_FollowLineDistance(0.0f, ARC_LENGTH_M);
+
+    last_loop_ms = g_ms_ticks;
+    last_display_ms = g_ms_ticks;
+
+    while (1) {
+        uint32_t now = g_ms_ticks;
+
+        /* 10ms 控制周期 */
+        if ((now - last_loop_ms) >= LOOP_MS) {
+            float dt = (float)(now - last_loop_ms) / 1000.0f;
+            last_loop_ms = now;
+
+            Encoder_Update(dt);
+            Motion_Update10ms();
+
+            ++loop_count;
+
+            /* 检测完成(弧长兜底) */
+            if (!done && Motion_IsComplete()) {
+                done = true;
+                done_time = now;
+                Motor_Stop();
+                Buzzer_Beep(BEEP_MS);
+            }
+            /* 全白丢线 → 停车 + 蜂鸣 */
+            if (!done && Motion_HasFault()) {
+                done = true;
+                done_time = now;
+                Motor_Stop();
+                Buzzer_Beep(BEEP_MS);
+            }
+        }
+
+        /* 蓝牙调参轮询 */
+        BT_Params_t bt_params;
+        if (BT_Poll(&bt_params)) {
+            /* 收到新参数，实时更新 */
+            Motion_SetLineBasePWM(bt_params.base_pwm);
+            Motion_SetHeadingGains((float)bt_params.heading_kp, HEADING_KD, HEADING_LIM);
+            Motion_SetSpeedGains((float)bt_params.speed_kp, SPEED_KI);
+        }
+
+        /* 200ms 刷新显示 */
+        if ((now - last_display_ms) >= 200U) {
+            last_display_ms = now;
+            speed = Encoder_GetSpeed();
+            dist = Encoder_GetDistance();
+            float avg_dist = (fabsf(dist.left) + fabsf(dist.right)) * 0.5f;
+
+            OLED_Clear();
+
+            if (done) {
+                if (Motion_HasFault()) {
+                    OLED_ShowString(0, 0, "LOST LINE!", 12);
+                } else {
+                    OLED_ShowString(0, 0, "ARC DONE!", 12);
+                }
+                OLED_ShowString(0, 16, "T:", 12);
+                OLED_ShowNum(16, 16, done_time / 1000U, 2, 12);
+                OLED_ShowString(32, 16, ".", 12);
+                OLED_ShowNum(40, 16, (done_time % 1000U) / 100U, 1, 12);
+                OLED_ShowString(48, 16, "s", 12);
+            } else {
+                OLED_ShowString(0, 0, "F:", 12);
+                /* 显示8路灰度状态（1=黑线, 0=白底） */
+                uint8_t gray_raw = GraySensor_Read();
+                for (uint8_t i = 0; i < 8; i++) {
+                    OLED_ShowNum(16 + i * 12, 0, (gray_raw >> i) & 1, 1, 12);
+                }
+            }
+
+            /* 第二行：弧长 */
+            OLED_ShowString(0, 16, "D:", 12);
+            display_signed_tenths(16, 16, avg_dist * 100.0f);
+            OLED_ShowString(64, 16, "/", 12);
+            display_signed_tenths(72, 16, ARC_LENGTH_M * 100.0f);
+            OLED_ShowString(112, 16, "cm", 12);
+
+            /* 第三行：左右速度 */
+            OLED_ShowString(0, 32, "L:", 12);
+            display_signed_tenths(16, 32, -speed.left * 100.0f);
+            OLED_ShowString(64, 32, "R:", 12);
+            display_signed_tenths(80, 32, -speed.right * 100.0f);
+
+            /* 第四行：yaw + 线状态 */
+            OLED_ShowString(0, 48, "Y:", 12);
+            display_signed_tenths(12, 48, JY61P_GetYaw());
+            OLED_ShowString(72, 48, "LN:", 12);
+            OLED_ShowNum(92, 48, LineSensor_IsValid() ? 1U : 0U, 1, 12);
+
+            OLED_Refresh();
+            DL_GPIO_togglePins(LED_STATUS_PORT, LED_STATUS_LED_PIN);
+        }
+    }
+}
+
+#endif /* TEST_LINE_MODE */
 
 /* ================================================================
  *  TEST_HEADING_LOOP — 待实现

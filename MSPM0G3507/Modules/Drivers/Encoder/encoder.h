@@ -15,6 +15,7 @@ typedef struct {
 } EncoderPair;
 
 void Encoder_Init(void);
+void Encoder_SetDirection(int left_dir, int right_dir);  /* +1或-1，前进时速度>0 */
 void Encoder_OnLeftAEdge(void);
 void Encoder_OnRightAEdge(void);
 void Encoder_Update(float dt_s);

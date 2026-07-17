@@ -15,9 +15,8 @@ static float heading_kp = 5.0f;
 static float heading_kd = 0.2f;
 static float heading_limit = 500.0f;
 
-/* ========== 循迹环 P ========== */
-static float line_kp = 300.0f;
-static float line_limit = 500.0f;
+/* ========== 循迹环（固定 PWM + 转向，PD 控制在 line_sensor.c 内部） ========== */
+static int16_t line_base_pwm = 600;     /* 基准 PWM */
 
 /* ========== 内部状态 ========== */
 static MotionState state;
@@ -32,7 +31,7 @@ static float forward_only(float value)
 
 static float speed_pi(SpeedPI *pi, float error)
 {
-    pi->integral = clamp(pi->integral + error * 0.01f, 10.0f);
+    pi->integral = clamp(pi->integral + error * 0.005f, 10.0f);
     return clamp(pi->kp * error + pi->ki * pi->integral, 4000.0f);
 }
 
@@ -57,10 +56,9 @@ void Motion_SetHeadingGains(float kp, float kd, float limit)
     heading_limit = limit;
 }
 
-void Motion_SetLineGains(float kp, float limit)
+void Motion_SetLineBasePWM(int16_t base_pwm)
 {
-    line_kp = kp;
-    line_limit = limit;
+    line_base_pwm = base_pwm;
 }
 
 /* ========== 运动控制接口 ========== */
@@ -80,7 +78,10 @@ void Motion_DriveHeading(float metres, float speed_mps, float yaw_deg)
 { Motion_DriveDistance(metres, speed_mps); target_yaw = yaw_deg; state = MOTION_HEADING; }
 
 void Motion_FollowLine(float speed_mps)
-{ reset_controllers(); target_speed = fabsf(speed_mps); state = MOTION_LINE; }
+{ Encoder_ResetDistance(); reset_controllers(); target_speed = fabsf(speed_mps); target_distance = 0.0f; state = MOTION_LINE; }
+
+void Motion_FollowLineDistance(float speed_mps, float max_metres)
+{ Encoder_ResetDistance(); reset_controllers(); target_speed = fabsf(speed_mps); target_distance = fabsf(max_metres); state = MOTION_LINE; }
 
 void Motion_Stop(void) { Motor_Stop(); state = MOTION_IDLE; }
 
@@ -96,13 +97,30 @@ void Motion_Update10ms(void)
     }
 
     if (state == MOTION_LINE) {
-        if (LineSensor_IsEndpoint()) { Motor_Stop(); state = MOTION_DONE; return; }
-        if (!LineSensor_IsValid() || LineSensor_IsLost()) { Motor_Stop(); state = MOTION_FAULT; return; }
-        steering = clamp(line_kp * LineSensor_GetError(), line_limit);
+        /* 循迹：GetError() 内部已完成 PD+死区+限速，直接返回 steer */
+        int16_t steer = (int16_t)LineSensor_GetError();
+        // TODO: 调参阶段暂时注释掉停止条件，让车一直跑
+        // if (LineSensor_IsEndpoint()) { Motor_Stop(); state = MOTION_DONE; return; }
+        // if (!LineSensor_IsValid() || LineSensor_IsLost()) { Motor_Stop(); state = MOTION_FAULT; return; }
+        // if (target_distance > 0.0f) {
+        //     float avg_dist = (fabsf(travelled.left) + fabsf(travelled.right)) * 0.5f;
+        //     if (avg_dist >= target_distance) { Motor_Stop(); state = MOTION_DONE; return; }
+        // }
+        /* 丢线时保持上次转向继续走 */
+        if (!LineSensor_IsValid() || LineSensor_IsLost()) {
+            // 不停车，保持当前转向继续
+        }
+        /* H题限制：内侧轮不能反转 */
+        if (steer > line_base_pwm) steer = line_base_pwm;
+        if (steer < -line_base_pwm) steer = -line_base_pwm;
+        Motor_SetPWM((int32_t)(line_base_pwm - steer),
+                     (int32_t)(line_base_pwm + steer));
+        return;
     } else {
+        /* 直线/对角线：速度 PI + 航向 PD */
         float heading_error = target_yaw - JY61P_GetYaw();
         steering = clamp(heading_kp * heading_error +
-            heading_kd * (heading_error - last_heading_error) / 0.01f, heading_limit);
+            heading_kd * (heading_error - last_heading_error) / 0.005f, heading_limit);
         last_heading_error = heading_error;
         if ((fabsf(travelled.left) + fabsf(travelled.right)) * 0.5f >= target_distance) {
             Motor_Stop(); state = MOTION_DONE; return;
