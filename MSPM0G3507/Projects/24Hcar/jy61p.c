@@ -132,7 +132,11 @@ void JY61P_UART_IRQHandler(void)
  * ================================================================ */
 float JY61P_GetYaw(void)
 {
-    return (float)raw_yaw * ANGLE_SCALE - yaw_offset;
+    float yaw = (float)raw_yaw * ANGLE_SCALE - yaw_offset;
+    /* 归一化到 -180° ~ +180° */
+    while (yaw > 180.0f)  yaw -= 360.0f;
+    while (yaw < -180.0f) yaw += 360.0f;
+    return yaw;
 }
 
 int16_t JY61P_GetYawRaw(void)
