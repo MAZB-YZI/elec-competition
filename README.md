@@ -16,11 +16,16 @@ elec-competition/
 │   ├── Modules/                   # 共享驱动和控制模块
 │   │   ├── Control/               # PID 控制算法
 │   │   └── Drivers/               # 硬件驱动
-│   │       ├── DC_MOTOR/          # TB6612 双电机驱动
+│   │       ├── DC_MOTOR/          # TB6612 双电机驱动 + PID
 │   │       ├── Encoder/           # 编码器驱动
 │   │       ├── JY61P/             # JY61P 串口陀螺仪
+│   │       ├── GraySensor/        # 8路灰度传感器
+│   │       ├── OLED/              # OLED 显示驱动（脏页优化）
+│   │       ├── Bluetooth/         # 蓝牙驱动
 │   │       ├── Buzzer/            # 蜂鸣器驱动
-│   │       └── OLED/              # OLED 显示驱动
+│   │       ├── F32C_MOTOR/        # F32C 云台电机驱动
+│   │       ├── MPU6050/           # MPU6050 六轴传感器
+│   │       └── UART_DEBUG/        # UART 调试驱动
 │   ├── Projects/                  # 工程项目
 │   │   ├── H_CAR_MSPM0G3507/     # H题主线工程（速度环测试）
 │   │   ├── JY61P_OLED_MSPM0G3507/ # JY61P 陀螺仪测试工程
