@@ -97,6 +97,10 @@ void BT_SendParams(const TuningParams_t *p)
     BT_Printf("KP=%.2f KI=%.2f BASE=%d TURN=%d LIM=%d ROUTE=%s\r\n",
               p->KP, p->KI, p->BASE_PWM, p->TURN_SPEED, p->OUTPUT_LIM,
               Route_GetStateName());
+    BT_Printf("AC=%.1f BD=%.1f TKP=%.1f ADIST=%.0f LKP=%.1f LKD=%.1f SSPD=%.2f\r\n",
+              Route_GetAcAngle(), Route_GetBdAngle(), Route_GetTurnKp(),
+              Route_GetArcDistCm(), Route_GetLineKp(), Route_GetLineKd(),
+              Route_GetArcSearchSpd());
 }
 
 static bool parse_cmd(const char *cmd, TuningParams_t *p)
@@ -152,6 +156,26 @@ static bool parse_cmd(const char *cmd, TuningParams_t *p)
     if (sscanf(cmd, "LKD %f", &val) == 1) {
         Route_SetLineKd(val);
         BT_Printf("OK LKD=%.2f\r\n", val);
+        return false;
+    }
+    if (sscanf(cmd, "TKP %f", &val) == 1) {
+        Route_SetTurnKp(val);
+        BT_Printf("OK TKP=%.2f\r\n", val);
+        return false;
+    }
+    if (sscanf(cmd, "ACANG %f", &val) == 1) {
+        Route_SetAcAngle(val);
+        BT_Printf("OK ACANG=%.1f\r\n", val);
+        return false;
+    }
+    if (sscanf(cmd, "BDANG %f", &val) == 1) {
+        Route_SetBdAngle(val);
+        BT_Printf("OK BDANG=%.1f\r\n", val);
+        return false;
+    }
+    if (sscanf(cmd, "SSPD %f", &val) == 1) {
+        Route_SetArcSearchSpd(val);
+        BT_Printf("OK SSPD=%.2f\r\n", val);
         return false;
     }
     if (sscanf(cmd, "ADIST %f", &val) == 1) {

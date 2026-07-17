@@ -9,11 +9,16 @@
 #define ROUTE_BC_ARC_CM           110.0f
 #define ROUTE_CD_DISTANCE_CM      100.0f
 #define ROUTE_DA_ARC_CM           110.0f
-#define ROUTE_AC_DIAG_CM          120.0f
-#define ROUTE_BD_DIAG_CM          120.0f
+#define ROUTE_AC_DIAG_CM          126.0f
+#define ROUTE_BD_DIAG_CM          126.0f
 #define ROUTE_CB_ARC_CM           110.0f
 #define ROUTE_AC_ANGLE_DEG       (-38.7f)  /* A→C 右下, 逆时针为正 */
 #define ROUTE_BD_ANGLE_DEG      (-141.3f)  /* B→D 左下 */
+
+/* 可调角度 (蓝牙可改) */
+static float    g_ac_angle = -40.0f;
+static float    g_bd_angle = ROUTE_BD_ANGLE_DEG;
+static float    g_turn_kp = 4.0f;        /* A_TURN 角度环 KP */
 
 /* ── 默认参数 ── */
 #define ROUTE_ARC_PWM_DEFAULT     650
@@ -44,6 +49,8 @@ typedef enum {
     ROUTE_STATE_AC_DIAG,
     ROUTE_STATE_CB_ARC,
     ROUTE_STATE_BD_DIAG,
+    /* MODE 4 新增 */
+    ROUTE_STATE_A_TURN,       /* A点转向A→C方向 */
     /* 通用 */
     ROUTE_STATE_FINISHED,
     ROUTE_STATE_STOPPED
@@ -63,12 +70,15 @@ static float    g_heading_kp;
 static int16_t  g_straight_trim;
 static int8_t   g_heading_sign;
 static float    g_ab_yaw;             /* A→B 锁定的初始航向 */
+static uint8_t  g_lap_count;          /* 当前圈数 */
+static uint8_t  g_max_laps;           /* 总圈数 */
 
 /* 圆弧段参数 */
 static int16_t  g_arc_pwm;
 static float    g_line_kp;
 static float    g_line_kd;
 static float    g_arc_target_cm;
+static float    g_arc_search_spd;    /* 找线速度比例 0~1 */
 
 /* 圆弧内部状态 */
 static float    g_arc_start_dist;
@@ -153,13 +163,13 @@ static bool FollowArcCm(float target_cm, float yaw_deg, int8_t dir, int8_t searc
 
     /* 退出条件: 距离达标 (yaw 作为辅助, 不再强制) */
     bool dist_ok = (dist >= target_cm);
-    if (dist_ok) {
+    uint8_t raw = GraySensor_Read();
+    int16_t pos = GraySensor_GetPosition(raw);
+
+    if (g_arc_line_found && pos < 0) {
         Motor_Stop();
         return true;
     }
-
-    uint8_t raw = GraySensor_Read();
-    int16_t pos = GraySensor_GetPosition(raw);
 
     /* ── 识别到线就进入巡线 ── */
     if (pos >= 0) {
@@ -168,7 +178,7 @@ static bool FollowArcCm(float target_cm, float yaw_deg, int8_t dir, int8_t searc
 
     /* ── 找线阶段: 还没看到线, 朝弧线方向转弯搜索 ── */
     if (!g_arc_line_found && search_dir != 0) {
-        int16_t search_bias = (int16_t)(g_arc_pwm * 0.5f) * search_dir;
+        int16_t search_bias = (int16_t)(g_arc_pwm * g_arc_search_spd) * search_dir;
         int16_t left  = Route_ClampPwm((int32_t)g_arc_pwm + search_bias);
         int16_t right = Route_ClampPwm((int32_t)g_arc_pwm - search_bias);
         Motor_SetLeftSpeed(left * dir);
@@ -253,6 +263,37 @@ void Route_SetArcDistCm(float cm)
     g_arc_target_cm = cm;
 }
 
+void Route_SetArcSearchSpd(float spd)
+{
+    if (spd < 0.0f) spd = 0.0f;
+    if (spd > 1.0f) spd = 1.0f;
+    g_arc_search_spd = spd;
+}
+
+void Route_SetAcAngle(float deg)
+{
+    g_ac_angle = deg;
+}
+
+void Route_SetBdAngle(float deg)
+{
+    g_bd_angle = deg;
+}
+
+void Route_SetTurnKp(float kp)
+{
+    if (kp < 0.0f) kp = 0.0f;
+    g_turn_kp = kp;
+}
+
+float Route_GetAcAngle(void)      { return g_ac_angle; }
+float Route_GetBdAngle(void)      { return g_bd_angle; }
+float Route_GetTurnKp(void)       { return g_turn_kp; }
+float Route_GetArcDistCm(void)    { return g_arc_target_cm; }
+float Route_GetLineKp(void)       { return g_line_kp; }
+float Route_GetLineKd(void)       { return g_line_kd; }
+float Route_GetArcSearchSpd(void) { return g_arc_search_spd; }
+
 /* ── 生命周期 ── */
 
 void Route_Init(void)
@@ -265,6 +306,8 @@ void Route_Init(void)
     g_need_heading_lock = false;
     g_yaw_target_set  = false;
     g_ab_yaw          = 0.0f;
+    g_lap_count       = 0;
+    g_max_laps        = 1;
     g_straight_pwm    = 800;
     g_heading_kp      = 6.0f;
     g_straight_trim   = 30;
@@ -274,6 +317,7 @@ void Route_Init(void)
     g_line_kp         = ROUTE_LINE_KP_DEFAULT;
     g_line_kd         = ROUTE_LINE_KD_DEFAULT;
     g_arc_target_cm   = ROUTE_BC_ARC_CM;
+    g_arc_search_spd  = 0.5f;
     g_arc_heading_lim = ROUTE_ARC_CORR_LIM;
     g_line_prev_error = 0.0f;
     g_arc_start_dist  = 0.0f;
@@ -282,7 +326,8 @@ void Route_Init(void)
 void Route_SetMode(RouteMode_t mode)
 {
     if (mode == ROUTE_MODE_REQ1 || mode == ROUTE_MODE_REQ2 ||
-        mode == ROUTE_MODE_REQ3 || mode == ROUTE_MODE_ARC_TEST) {
+        mode == ROUTE_MODE_REQ3 || mode == ROUTE_MODE_REQ4 ||
+        mode == ROUTE_MODE_ARC_TEST) {
         g_mode = mode;
     }
     g_mode = mode;
@@ -328,10 +373,22 @@ void Route_Start(void)
         Buzzer_Beep(ROUTE_POINT_BEEP_MS);
     } else if (g_mode == ROUTE_MODE_REQ3) {
         /* MODE 3: A→C 斜线起步, 车头朝C方向 */
-        g_ab_yaw = 0.0f;  /* A→B航向在AB_STRAIGHT中保存, MODE3不用AB */
+        g_ab_yaw = 0.0f;
+        g_lap_count = 0;
+        g_max_laps = 1;
         g_state = ROUTE_STATE_AC_DIAG;
         g_need_heading_lock = true;
         g_yaw_target_set = false;
+        Buzzer_Beep(ROUTE_POINT_BEEP_MS);
+    } else if (g_mode == ROUTE_MODE_REQ4) {
+        /* MODE 4: 同 MODE 3 路线, 跑4圈 */
+        g_ab_yaw = 0.0f;
+        g_lap_count = 0;
+        g_max_laps = 4;
+        g_target_yaw = ROUTE_AC_ANGLE_DEG;
+        g_state = ROUTE_STATE_AC_DIAG;
+        g_need_heading_lock = true;
+        g_yaw_target_set = true;
         Buzzer_Beep(ROUTE_POINT_BEEP_MS);
     } else if (g_mode == ROUTE_MODE_ARC_TEST) {
         g_state = ROUTE_STATE_ARC_TEST;
@@ -405,9 +462,9 @@ bool Route_Update5ms(float yaw_deg)
     /* ── MODE 1: B 提示 → 结束 / MODE 3: B→D 斜线 ── */
     case ROUTE_STATE_B_PROMPT:
         if (++g_wait_ticks >= ROUTE_POINT_WAIT_TICKS) {
-            if (g_mode == ROUTE_MODE_REQ3) {
+            if (g_mode == ROUTE_MODE_REQ3 || g_mode == ROUTE_MODE_REQ4) {
                 /* MODE 3: B→D 斜线, 目标直接用绝对角度 */
-                g_target_yaw = ROUTE_BD_ANGLE_DEG;
+                g_target_yaw = g_bd_angle;
                 /* 归一化到出弧 yaw 附近, 确保走最短路径 */
                 while (g_target_yaw - yaw_deg > 180.0f)  g_target_yaw -= 360.0f;
                 while (g_target_yaw - yaw_deg < -180.0f) g_target_yaw += 360.0f;
@@ -435,7 +492,7 @@ bool Route_Update5ms(float yaw_deg)
         if (++g_wait_ticks >= ROUTE_POINT_WAIT_TICKS) {
             Buzzer_Beep(ROUTE_POINT_BEEP_MS);
             Encoder_ResetDistance();
-            if (g_mode == ROUTE_MODE_REQ3) {
+            if (g_mode == ROUTE_MODE_REQ3 || g_mode == ROUTE_MODE_REQ4) {
                 /* MODE 3: C→B 右弧前进 */
                 g_arc_start_dist = Encoder_GetAverageDistanceCm();
                 g_line_prev_error = 0.0f;
@@ -489,8 +546,45 @@ bool Route_Update5ms(float yaw_deg)
 
     case ROUTE_STATE_A_PROMPT:
         if (++g_wait_ticks >= ROUTE_POINT_WAIT_TICKS) {
-            Motor_Stop();
-            g_state = ROUTE_STATE_FINISHED;
+            if (g_mode == ROUTE_MODE_REQ3 || g_mode == ROUTE_MODE_REQ4) {
+                g_lap_count++;
+            }
+
+            if ((g_mode == ROUTE_MODE_REQ4) && (g_lap_count < g_max_laps)) {
+                /* 还有下一圈, 转向A→C方向 */
+                g_lap_count++;
+                g_target_yaw = g_ac_angle;
+                g_need_heading_lock = true;
+                g_yaw_target_set = true;
+                Encoder_ResetDistance();
+                g_lap_count--;
+                g_state = ROUTE_STATE_AC_DIAG;
+            } else {
+                Motor_Stop();
+                g_state = ROUTE_STATE_FINISHED;
+            }
+        }
+        return true;
+
+    /* ── MODE 4: A点转向A→C方向 ── */
+    case ROUTE_STATE_A_TURN:
+        {
+            float yaw_err = Route_YawDiff(yaw_deg, g_target_yaw);
+            if (yaw_err > -3.0f && yaw_err < 3.0f) {
+                /* 转向完成, 开始下一圈 */
+                Encoder_ResetDistance();
+                g_need_heading_lock = true;
+                g_yaw_target_set = true;
+                g_state = ROUTE_STATE_AC_DIAG;
+            } else {
+                int16_t turn_spd = (int16_t)(yaw_err * g_turn_kp);
+                if (turn_spd > 400) turn_spd = 400;
+                if (turn_spd < -400) turn_spd = -400;
+                if (turn_spd > 0 && turn_spd < 150) turn_spd = 150;
+                if (turn_spd < 0 && turn_spd > -150) turn_spd = -150;
+                Motor_SetLeftSpeed(turn_spd);
+                Motor_SetRightSpeed(-turn_spd);
+            }
         }
         return true;
 
@@ -562,6 +656,7 @@ bool Route_IsActive(void)
     case ROUTE_STATE_AC_DIAG:
     case ROUTE_STATE_CB_ARC:
     case ROUTE_STATE_BD_DIAG:
+    case ROUTE_STATE_A_TURN:
         return true;
     default:
         return false;
@@ -584,6 +679,7 @@ const char *Route_GetStateName(void)
     case ROUTE_STATE_AC_DIAG:       return "AC  ";
     case ROUTE_STATE_CB_ARC:        return "CB  ";
     case ROUTE_STATE_BD_DIAG:       return "BD  ";
+    case ROUTE_STATE_A_TURN:        return "ATrn";
     case ROUTE_STATE_FINISHED:      return "DONE";
     case ROUTE_STATE_STOPPED:       return "STOP";
     default:                        return "????";

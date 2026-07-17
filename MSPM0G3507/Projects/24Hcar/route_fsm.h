@@ -26,6 +26,18 @@ void Route_SetArcBase(int16_t pwm);
 void Route_SetLineKp(float kp);
 void Route_SetLineKd(float kd);
 void Route_SetArcDistCm(float cm);
+void Route_SetArcSearchSpd(float spd);
+void Route_SetAcAngle(float deg);
+void Route_SetBdAngle(float deg);
+void Route_SetTurnKp(float kp);
+
+float Route_GetAcAngle(void);
+float Route_GetBdAngle(void);
+float Route_GetTurnKp(void);
+float Route_GetArcDistCm(void);
+float Route_GetLineKp(void);
+float Route_GetLineKd(void);
+float Route_GetArcSearchSpd(void);
 
 void Route_Start(void);
 void Route_Stop(void);
