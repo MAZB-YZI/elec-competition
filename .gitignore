@@ -15,6 +15,10 @@
 !MSPM0G3507/Projects/H_CAR_MSPM0G3507/
 !MSPM0G3507/Projects/H_CAR_MSPM0G3507/**
 
+# Whitelist: 24Hcar project (2024 H题完整版)
+!MSPM0G3507/Projects/24Hcar/
+!MSPM0G3507/Projects/24Hcar/**
+
 # Whitelist: ec_vision (MaixCAM2 vision framework)
 !ec_vision/
 !ec_vision/**
