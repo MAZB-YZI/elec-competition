@@ -293,6 +293,10 @@ float Route_GetArcDistCm(void)    { return g_arc_target_cm; }
 float Route_GetLineKp(void)       { return g_line_kp; }
 float Route_GetLineKd(void)       { return g_line_kd; }
 float Route_GetArcSearchSpd(void) { return g_arc_search_spd; }
+float Route_GetHeadingKp(void)    { return g_heading_kp; }
+int16_t Route_GetStraightTrim(void) { return g_straight_trim; }
+int8_t Route_GetHeadingSign(void)   { return g_heading_sign; }
+int16_t Route_GetArcBase(void)      { return g_arc_pwm; }
 
 /* ── 生命周期 ── */
 

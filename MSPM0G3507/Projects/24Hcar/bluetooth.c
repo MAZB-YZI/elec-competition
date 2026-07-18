@@ -16,6 +16,8 @@ static uint32_t rx_last_ms;
 static volatile uint32_t *bt_tick;
 
 static TuningParams_t g_params;
+static char last_cmd[RX_BUF_SIZE];
+static uint32_t last_cmd_ms;
 
 void UART_PB_INST_IRQHandler(void)
 {
@@ -72,7 +74,7 @@ void BT_Send(const char *str)
 
 void BT_Printf(const char *fmt, ...)
 {
-    char buf[128];
+    char buf[256];
     va_list ap;
     int len;
 
@@ -94,13 +96,13 @@ void BT_Printf(const char *fmt, ...)
 
 void BT_SendParams(const TuningParams_t *p)
 {
-    BT_Printf("KP=%.2f KI=%.2f BASE=%d TURN=%d LIM=%d ROUTE=%s\r\n",
+    BT_Printf("KP=%.2f KI=%.2f BASE=%d TURN=%d LIM=%d HSIGN=%d AC=%.1f BD=%.1f TKP=%.1f ARC=%d SSPD=%.2f ADIST=%.0f LKP=%.1f LKD=%.1f HKP=%.1f TRIM=%d ROUTE=%s\r\n",
               p->KP, p->KI, p->BASE_PWM, p->TURN_SPEED, p->OUTPUT_LIM,
-              Route_GetStateName());
-    BT_Printf("AC=%.1f BD=%.1f TKP=%.1f ADIST=%.0f LKP=%.1f LKD=%.1f SSPD=%.2f\r\n",
-              Route_GetAcAngle(), Route_GetBdAngle(), Route_GetTurnKp(),
+              Route_GetHeadingSign(), Route_GetAcAngle(), Route_GetBdAngle(),
+              Route_GetTurnKp(), Route_GetArcBase(), Route_GetArcSearchSpd(),
               Route_GetArcDistCm(), Route_GetLineKp(), Route_GetLineKd(),
-              Route_GetArcSearchSpd());
+              Route_GetHeadingKp(), Route_GetStraightTrim(),
+              Route_GetStateName());
 }
 
 static bool parse_cmd(const char *cmd, TuningParams_t *p)
@@ -230,6 +232,14 @@ bool BT_Poll(TuningParams_t *params)
 
     if (rx_ready) {
         rx_ready = false;
+        /* 防止蓝牙回显导致重复处理 */
+        if (bt_tick != NULL && strcmp(rx_buf, last_cmd) == 0 &&
+            (*bt_tick - last_cmd_ms) < 100U) {
+            return false;
+        }
+        strncpy(last_cmd, rx_buf, RX_BUF_SIZE - 1);
+        last_cmd[RX_BUF_SIZE - 1] = '\0';
+        if (bt_tick != NULL) last_cmd_ms = *bt_tick;
         g_params = *params;
         updated = parse_cmd(rx_buf, &g_params);
         if (updated) {

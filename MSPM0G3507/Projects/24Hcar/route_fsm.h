@@ -38,6 +38,10 @@ float Route_GetArcDistCm(void);
 float Route_GetLineKp(void);
 float Route_GetLineKd(void);
 float Route_GetArcSearchSpd(void);
+float Route_GetHeadingKp(void);
+int16_t Route_GetStraightTrim(void);
+int8_t Route_GetHeadingSign(void);
+int16_t Route_GetArcBase(void);
 
 void Route_Start(void);
 void Route_Stop(void);
