@@ -146,7 +146,7 @@ bool MPU6050_CalibrateGyro(uint16_t samples)
             return false;
         }
         sum_z += raw.gyro_z;
-        delay_ms(2U);
+        delay_ms(1U);
     }
 
     gyro_z_bias_raw = (float) sum_z / (float) samples;
