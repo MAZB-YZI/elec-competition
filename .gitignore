@@ -19,6 +19,10 @@
 !MSPM0G3507/Projects/24Hcar/
 !MSPM0G3507/Projects/24Hcar/**
 
+# Whitelist: 24Hcar MPU6050 bring-up test project
+!MSPM0G3507/Projects/24Hcar -MPU6050/
+!MSPM0G3507/Projects/24Hcar -MPU6050/**
+
 # Whitelist: ec_vision (MaixCAM2 vision framework)
 !ec_vision/
 !ec_vision/**

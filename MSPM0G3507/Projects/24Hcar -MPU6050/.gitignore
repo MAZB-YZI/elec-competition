@@ -1,0 +1,6 @@
+Debug/
+*.out
+*.map
+*.xml
+*.d_raw
+*.o
