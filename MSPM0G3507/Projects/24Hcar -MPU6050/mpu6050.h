@@ -7,7 +7,7 @@
 
 #define MPU6050_I2C_ADDRESS 0x68U
 #define MPU6050_I2C_TIMEOUT_TICKS 1000U
-#define MPU6050_WHO_AM_I_EXPECTED 0x68U
+#define MPU6050_WHO_AM_I_EXPECTED 0x70U
 
 typedef struct {
     int16_t accel_x;
@@ -19,13 +19,29 @@ typedef struct {
     int16_t gyro_z;
 } MPU6050Raw;
 
+typedef struct {
+    float roll_deg;
+    float pitch_deg;
+    float yaw_deg;
+    float gyro_x_dps;
+    float gyro_y_dps;
+    float gyro_z_dps;
+    float gyro_z_bias_raw;
+} MPU6050Attitude;
+
 bool MPU6050_Init(void);
 bool MPU6050_ReadRaw(MPU6050Raw *raw);
 bool MPU6050_CalibrateGyro(uint16_t samples);
 bool MPU6050_Update(float dt_s);
+bool MPU6050_UpdateYawOnly(float dt_s);
 float MPU6050_GetYaw(void);
+float MPU6050_GetRoll(void);
+float MPU6050_GetPitch(void);
+float MPU6050_GetGyroX(void);
+float MPU6050_GetGyroY(void);
 float MPU6050_GetGyroZ(void);
 float MPU6050_GetGyroZBias(void);
+void MPU6050_GetAttitude(MPU6050Attitude *attitude);
 uint8_t MPU6050_GetWhoAmI(void);
 uint32_t MPU6050_GetReadErrorCount(void);
 void MPU6050_ResetYaw(void);

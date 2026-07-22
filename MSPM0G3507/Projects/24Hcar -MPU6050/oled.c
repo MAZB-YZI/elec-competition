@@ -1,71 +1,140 @@
-#include "oled.h"
+﻿#include "oled.h"
 #include "oledfont.h"
 #include "delay.h"
-#include "ti/driverlib/dl_i2c.h"
 #include <string.h>
 
-/* ========== 显存缓冲区 ========== */
 uint8_t OLED_GRAM[OLED_WIDTH][OLED_PAGES];
-static uint8_t OLED_Dirty;       /* bit p = 第 p 页有变化 */
-static uint8_t OLED_First = 1;   /* 首次刷新全屏 */
+static uint8_t OLED_Dirty;
+static uint8_t OLED_First = 1;
 
-/* ========== I2C 底层驱动 ========== */
-static void OLED_WR_Byte(uint8_t dat, uint8_t mode)
+#define OLED_SDA_PORT GPIOA
+#define OLED_SDA_PIN  DL_GPIO_PIN_28
+#define OLED_SDA_IOMUX IOMUX_PINCM3
+#define OLED_SCL_PORT GPIOA
+#define OLED_SCL_PIN  DL_GPIO_PIN_31
+#define OLED_SCL_IOMUX IOMUX_PINCM6
+#define OLED_I2C_DELAY_US 2U
+
+static uint8_t OLED_SoftInited;
+
+static void OLED_SDA_Release(void)
 {
-    uint8_t txData[2];
-
-    // 控制字节: 0x00为命令, 0x40为数据
-    txData[0] = mode ? 0x40 : 0x00;
-    txData[1] = dat;
-
-    // 1. 等待 I2C 彻底空闲
-    while (!(DL_I2C_getControllerStatus(OLED_INST) & DL_I2C_CONTROLLER_STATUS_IDLE));
-
-    // 2. 将 2 个字节填入发送 FIFO
-    DL_I2C_fillControllerTXFIFO(OLED_INST, txData, 2);
-
-    // 3. 启动传输
-    DL_I2C_startControllerTransfer(OLED_INST, OLED_ADDR, DL_I2C_CONTROLLER_DIRECTION_TX, 2);
-
-    // 4. 等待总线变为 BUSY 状态
-    while (!(DL_I2C_getControllerStatus(OLED_INST) & DL_I2C_CONTROLLER_STATUS_BUSY_BUS));
-
-    // 5. 再次等待 I2C 回到空闲状态
-    while (!(DL_I2C_getControllerStatus(OLED_INST) & DL_I2C_CONTROLLER_STATUS_IDLE));
+    DL_GPIO_initDigitalInputFeatures(OLED_SDA_IOMUX,
+        DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_UP,
+        DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
+    DL_GPIO_disableOutput(OLED_SDA_PORT, OLED_SDA_PIN);
 }
 
-/* ========== 显示控制 ========== */
+static void OLED_SCL_Release(void)
+{
+    DL_GPIO_initDigitalInputFeatures(OLED_SCL_IOMUX,
+        DL_GPIO_INVERSION_DISABLE, DL_GPIO_RESISTOR_PULL_UP,
+        DL_GPIO_HYSTERESIS_DISABLE, DL_GPIO_WAKEUP_DISABLE);
+    DL_GPIO_disableOutput(OLED_SCL_PORT, OLED_SCL_PIN);
+}
+
+static void OLED_SDA_Low(void)
+{
+    DL_GPIO_initDigitalOutput(OLED_SDA_IOMUX);
+    DL_GPIO_clearPins(OLED_SDA_PORT, OLED_SDA_PIN);
+    DL_GPIO_enableOutput(OLED_SDA_PORT, OLED_SDA_PIN);
+}
+
+static void OLED_SCL_Low(void)
+{
+    DL_GPIO_initDigitalOutput(OLED_SCL_IOMUX);
+    DL_GPIO_clearPins(OLED_SCL_PORT, OLED_SCL_PIN);
+    DL_GPIO_enableOutput(OLED_SCL_PORT, OLED_SCL_PIN);
+}
+
+static void OLED_SoftI2C_Init(void)
+{
+    if (OLED_SoftInited) return;
+    OLED_SDA_Release();
+    OLED_SCL_Release();
+    delay_us(20U);
+    OLED_SoftInited = 1U;
+}
+
+static void OLED_I2C_Start(void)
+{
+    OLED_SDA_Release();
+    OLED_SCL_Release();
+    delay_us(OLED_I2C_DELAY_US);
+    OLED_SDA_Low();
+    delay_us(OLED_I2C_DELAY_US);
+    OLED_SCL_Low();
+}
+
+static void OLED_I2C_Stop(void)
+{
+    OLED_SDA_Low();
+    delay_us(OLED_I2C_DELAY_US);
+    OLED_SCL_Release();
+    delay_us(OLED_I2C_DELAY_US);
+    OLED_SDA_Release();
+    delay_us(OLED_I2C_DELAY_US);
+}
+
+static void OLED_I2C_WriteByte(uint8_t data)
+{
+    for (uint8_t i = 0U; i < 8U; ++i) {
+        OLED_SCL_Low();
+        if (data & 0x80U) OLED_SDA_Release();
+        else OLED_SDA_Low();
+        delay_us(OLED_I2C_DELAY_US);
+        OLED_SCL_Release();
+        delay_us(OLED_I2C_DELAY_US);
+        data <<= 1;
+    }
+    OLED_SCL_Low();
+    OLED_SDA_Release();
+    delay_us(OLED_I2C_DELAY_US);
+    OLED_SCL_Release();
+    delay_us(OLED_I2C_DELAY_US);
+    OLED_SCL_Low();
+}
+
+static void OLED_WR_Byte(uint8_t dat, uint8_t mode)
+{
+    OLED_SoftI2C_Init();
+    OLED_I2C_Start();
+    OLED_I2C_WriteByte((uint8_t)(OLED_ADDR << 1));
+    OLED_I2C_WriteByte(mode ? 0x40U : 0x00U);
+    OLED_I2C_WriteByte(dat);
+    OLED_I2C_Stop();
+}
 void OLED_ColorTurn(uint8_t i)
 {
-    if (i == 0) OLED_WR_Byte(0xA6, OLED_CMD);  // 正常显示
-    if (i == 1) OLED_WR_Byte(0xA7, OLED_CMD);  // 反色显示
+    if (i == 0) OLED_WR_Byte(0xA6, OLED_CMD);  // 姝ｅ父鏄剧ず
+    if (i == 1) OLED_WR_Byte(0xA7, OLED_CMD);  // 鍙嶈壊鏄剧ず
 }
 
 void OLED_DisplayTurn(uint8_t i)
 {
     if (i == 0) {
-        OLED_WR_Byte(0xC8, OLED_CMD);  // 正常显示
+        OLED_WR_Byte(0xC8, OLED_CMD);  // 姝ｅ父鏄剧ず
         OLED_WR_Byte(0xA1, OLED_CMD);
     }
     if (i == 1) {
-        OLED_WR_Byte(0xC0, OLED_CMD);  // 旋转180°
+        OLED_WR_Byte(0xC0, OLED_CMD);  // 鏃嬭浆180掳
         OLED_WR_Byte(0xA0, OLED_CMD);
     }
 }
 
-/* ========== 基础操作 ========== */
+/* ========== 鍩虹鎿嶄綔 ========== */
 void OLED_DisPlay_On(void)
 {
-    OLED_WR_Byte(0x8D, OLED_CMD);  // 电荷泵使能
-    OLED_WR_Byte(0x14, OLED_CMD);  // 开启电荷泵
-    OLED_WR_Byte(0xAF, OLED_CMD);  // 点亮屏幕
+    OLED_WR_Byte(0x8D, OLED_CMD);  // 鐢佃嵎娉典娇鑳?
+    OLED_WR_Byte(0x14, OLED_CMD);  // 寮€鍚數鑽锋车
+    OLED_WR_Byte(0xAF, OLED_CMD);  // 鐐逛寒灞忓箷
 }
 
 void OLED_DisPlay_Off(void)
 {
-    OLED_WR_Byte(0x8D, OLED_CMD);  // 电荷泵使能
-    OLED_WR_Byte(0x10, OLED_CMD);  // 关闭电荷泵
-    OLED_WR_Byte(0xAE, OLED_CMD);  // 关闭屏幕
+    OLED_WR_Byte(0x8D, OLED_CMD);  // 鐢佃嵎娉典娇鑳?
+    OLED_WR_Byte(0x10, OLED_CMD);  // 鍏抽棴鐢佃嵎娉?
+    OLED_WR_Byte(0xAE, OLED_CMD);  // 鍏抽棴灞忓箷
 }
 
 void OLED_Refresh(void)
@@ -92,7 +161,7 @@ void OLED_Clear(void)
     OLED_Refresh();
 }
 
-/* ========== 绘图功能 ========== */
+/* ========== 缁樺浘鍔熻兘 ========== */
 void OLED_DrawPoint(uint8_t x, uint8_t y)
 {
     if (x >= OLED_WIDTH || y >= OLED_HEIGHT) return;
@@ -114,13 +183,13 @@ void OLED_DrawLine(uint8_t x1, uint8_t y1, uint8_t x2, uint8_t y2)
     if (x1 >= OLED_WIDTH || x2 >= OLED_WIDTH || y1 >= OLED_HEIGHT || y2 >= OLED_HEIGHT) return;
     if (x1 > x2 || y1 > y2) return;
 
-    if (x1 == x2) {  // 竖线
+    if (x1 == x2) {  // 绔栫嚎
         for (uint8_t i = 0; i < (y2 - y1); i++)
             OLED_DrawPoint(x1, y1 + i);
-    } else if (y1 == y2) {  // 横线
+    } else if (y1 == y2) {  // 妯嚎
         for (uint8_t i = 0; i < (x2 - x1); i++)
             OLED_DrawPoint(x1 + i, y1);
-    } else {  // 斜线
+    } else {  // 鏂滅嚎
         uint8_t k1 = y2 - y1;
         uint8_t k2 = x2 - x1;
         uint8_t k = k1 * 10 / k2;
@@ -148,7 +217,7 @@ void OLED_DrawCircle(uint8_t x, uint8_t y, uint8_t r)
     }
 }
 
-/* ========== 显示功能 ========== */
+/* ========== 鏄剧ず鍔熻兘 ========== */
 void OLED_ShowChar(uint8_t x, uint8_t y, uint8_t chr, uint8_t size1)
 {
     uint8_t i, m, temp, size2, chr1;
@@ -181,7 +250,7 @@ void OLED_ShowString(uint8_t x, uint8_t y, const char *chr, uint8_t size1)
     while ((*chr >= ' ') && (*chr <= '~')) {
         OLED_ShowChar(x, y, *chr, size1);
         x += size1 / 2;
-        if (x > OLED_WIDTH - size1) {  // 换行
+        if (x > OLED_WIDTH - size1) {  // 鎹㈣
             x = 0;
             y += size1;
         }
@@ -258,36 +327,36 @@ void OLED_ShowPicture(uint8_t x0, uint8_t y0, uint8_t x1, uint8_t y1, const uint
     }
 }
 
-/* ========== 初始化 ========== */
+/* ========== 鍒濆鍖?========== */
 void OLED_Init(void)
 {
-    delay_ms(100);  // 等待上电复位
+    delay_ms(100);  // 绛夊緟涓婄數澶嶄綅
 
-    OLED_WR_Byte(0xAE, OLED_CMD);  // 关闭显示
-    OLED_WR_Byte(0xD5, OLED_CMD);  // 设置时钟分频
+    OLED_WR_Byte(0xAE, OLED_CMD);  // 鍏抽棴鏄剧ず
+    OLED_WR_Byte(0xD5, OLED_CMD);  // 璁剧疆鏃堕挓鍒嗛
     OLED_WR_Byte(0x80, OLED_CMD);
-    OLED_WR_Byte(0xA8, OLED_CMD);  // 设置复用率
+    OLED_WR_Byte(0xA8, OLED_CMD);  // 璁剧疆澶嶇敤鐜?
     OLED_WR_Byte(0x3F, OLED_CMD);  // 1/64 duty
-    OLED_WR_Byte(0xD3, OLED_CMD);  // 设置显示偏移
+    OLED_WR_Byte(0xD3, OLED_CMD);  // 璁剧疆鏄剧ず鍋忕Щ
     OLED_WR_Byte(0x00, OLED_CMD);
-    OLED_WR_Byte(0x40, OLED_CMD);  // 设置起始行
-    OLED_WR_Byte(0x8D, OLED_CMD);  // 电荷泵使能
+    OLED_WR_Byte(0x40, OLED_CMD);  // 璁剧疆璧峰琛?
+    OLED_WR_Byte(0x8D, OLED_CMD);  // 鐢佃嵎娉典娇鑳?
     OLED_WR_Byte(0x14, OLED_CMD);
-    OLED_WR_Byte(0x20, OLED_CMD);  // 设置寻址模式
+    OLED_WR_Byte(0x20, OLED_CMD);  // 璁剧疆瀵诲潃妯″紡
     OLED_WR_Byte(0x02, OLED_CMD);  // Page addressing
     OLED_WR_Byte(0xA1, OLED_CMD);  // Segment remap
-    OLED_WR_Byte(0xC8, OLED_CMD);  // COM扫描方向
-    OLED_WR_Byte(0xDA, OLED_CMD);  // COM引脚配置
+    OLED_WR_Byte(0xC8, OLED_CMD);  // COM鎵弿鏂瑰悜
+    OLED_WR_Byte(0xDA, OLED_CMD);  // COM寮曡剼閰嶇疆
     OLED_WR_Byte(0x12, OLED_CMD);
-    OLED_WR_Byte(0x81, OLED_CMD);  // 设置对比度
+    OLED_WR_Byte(0x81, OLED_CMD);  // 璁剧疆瀵规瘮搴?
     OLED_WR_Byte(0xCF, OLED_CMD);
-    OLED_WR_Byte(0xD9, OLED_CMD);  // 预充电周期
+    OLED_WR_Byte(0xD9, OLED_CMD);  // 棰勫厖鐢靛懆鏈?
     OLED_WR_Byte(0xF1, OLED_CMD);
-    OLED_WR_Byte(0xDB, OLED_CMD);  // VCOMH电压
+    OLED_WR_Byte(0xDB, OLED_CMD);  // VCOMH鐢靛帇
     OLED_WR_Byte(0x40, OLED_CMD);
-    OLED_WR_Byte(0xA4, OLED_CMD);  // 恢复显示内容
-    OLED_WR_Byte(0xA6, OLED_CMD);  // 正常显示
+    OLED_WR_Byte(0xA4, OLED_CMD);  // 鎭㈠鏄剧ず鍐呭
+    OLED_WR_Byte(0xA6, OLED_CMD);  // 姝ｅ父鏄剧ず
 
     OLED_Clear();
-    OLED_WR_Byte(0xAF, OLED_CMD);  // 开启显示
+    OLED_WR_Byte(0xAF, OLED_CMD);  // 寮€鍚樉绀?
 }
