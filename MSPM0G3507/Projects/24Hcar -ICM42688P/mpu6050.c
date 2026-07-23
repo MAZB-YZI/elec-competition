@@ -17,8 +17,8 @@
 #define ICM42688_GYRO_LSB_PER_DPS  32.768f  /* +/-1000 dps */
 #define ICM42688_ACCEL_LSB_PER_G   8192.0f  /* +/-4g */
 #define ICM42688_RAD_TO_DEG        57.2957795f
-#define ICM42688_GYRO_Z_DEADBAND   0.08f
-#define ICM42688_GYRO_Z_LPF_HZ     80.0f
+#define ICM42688_GYRO_Z_DEADBAND   0.0f
+#define ICM42688_GYRO_Z_LPF_HZ     0.0f
 #define ICM42688_MAX_DT_S          1.000f
 
 static uint8_t who_am_i;
@@ -34,7 +34,6 @@ static float accel_z_g;
 static float roll_deg;
 static float pitch_deg;
 static float yaw_deg;
-static bool gyro_z_lpf_ready;
 
 static bool write_reg(uint8_t reg, uint8_t value)
 {
@@ -146,8 +145,6 @@ bool MPU6050_CalibrateGyro(uint16_t samples)
     }
 
     gyro_z_bias_raw = 0.0f;
-    gyro_z_lpf_ready = false;
-
     for (uint16_t i = 0U; i < samples; ++i) {
         if (!read_reg(ICM42688_REG_GYRO_Z1, buffer, sizeof(buffer))) {
             return false;
@@ -181,9 +178,10 @@ bool MPU6050_UpdateYawOnly(float dt_s)
     gz_raw = make_i16(buffer[0], buffer[1]);
     gz_unbiased_dps = ((float)gz_raw - gyro_z_bias_raw) / ICM42688_GYRO_LSB_PER_DPS;
 
-    if (!gyro_z_lpf_ready) {
+    if (ICM42688_GYRO_Z_LPF_HZ <= 0.0f) {
         gyro_z_dps = gz_unbiased_dps;
-        gyro_z_lpf_ready = true;
+    } else if (gyro_z_dps == 0.0f) {
+        gyro_z_dps = gz_unbiased_dps;
     } else {
         gyro_z_dps = low_pass(gyro_z_dps, gz_unbiased_dps, ICM42688_GYRO_Z_LPF_HZ, dt_s);
     }
@@ -249,14 +247,12 @@ void MPU6050_ResetYaw(void)
 {
     yaw_deg = 0.0f;
     gyro_z_dps = 0.0f;
-    gyro_z_lpf_ready = false;
 }
 
 void MPU6050_ResetYawTo(float yaw)
 {
     yaw_deg = yaw;
     gyro_z_dps = 0.0f;
-    gyro_z_lpf_ready = false;
 }
 
 
