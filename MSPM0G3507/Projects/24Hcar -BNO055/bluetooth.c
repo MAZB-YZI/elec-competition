@@ -19,6 +19,14 @@ static TuningParams_t g_params;
 static char last_cmd[RX_BUF_SIZE];
 static uint32_t last_cmd_ms;
 
+static void bt_send_char(uint8_t ch)
+{
+    uint32_t guard = 10000U;
+
+    while ((guard-- > 0U) && !DL_UART_Main_transmitDataCheck(UART_PB_INST, ch)) {
+    }
+}
+
 void UART_PB_INST_IRQHandler(void)
 {
     switch (DL_UART_Main_getPendingInterrupt(UART_PB_INST)) {
@@ -68,7 +76,7 @@ void BT_SetTickPtr(volatile uint32_t *tick_ptr)
 void BT_Send(const char *str)
 {
     while (*str != '\0') {
-        DL_UART_Main_transmitDataBlocking(UART_PB_INST, (uint8_t)*str++);
+        bt_send_char((uint8_t)*str++);
     }
 }
 
@@ -90,7 +98,7 @@ void BT_Printf(const char *fmt, ...)
     }
 
     for (int i = 0; i < len; i++) {
-        DL_UART_Main_transmitDataBlocking(UART_PB_INST, (uint8_t)buf[i]);
+        bt_send_char((uint8_t)buf[i]);
     }
 }
 

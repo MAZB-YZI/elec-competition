@@ -133,12 +133,12 @@ bool MPU6050_UpdateYawOnly(float dt_s)
 
     if (!heading_valid) {
         heading_prev = new_heading;
-        yaw_deg = wrap_delta_180(new_heading - yaw_offset);
+        yaw_deg = -wrap_delta_180(new_heading - yaw_offset);
         heading_valid = true;
     } else {
         delta = wrap_delta_180(new_heading - heading_prev);
         heading_prev = new_heading;
-        yaw_deg += delta;
+        yaw_deg -= delta;
     }
 
     gyro_z_dps = 0.0f;
