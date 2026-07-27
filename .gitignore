@@ -1,10 +1,14 @@
 # Ignore everything by default
 *
 
-# Whitelist: only track Liner_Car0_Tom project
+# Whitelist: track all Liner_Car projects under MSPM0G3507
 !MSPM0G3507/
 !MSPM0G3507/Liner_Car0_Tom/
 !MSPM0G3507/Liner_Car0_Tom/**
+!MSPM0G3507/Liner_Car0_Rebuilt/
+!MSPM0G3507/Liner_Car0_Rebuilt/**
+!MSPM0G3507/Liner_Car1_Rebuilt/
+!MSPM0G3507/Liner_Car1_Rebuilt/**
 
 # Whitelist: ec_vision (MaixCAM2 vision framework)
 !ec_vision/
