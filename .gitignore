@@ -1,0 +1,23 @@
+# 忽略根目录所有内容
+/*
+!/Liner_Car1_Rebuilt/
+!.gitignore
+
+# Liner_Car1_Rebuilt 内部：忽略 CCS 工程配置
+/Liner_Car1_Rebuilt/.ccsproject
+/Liner_Car1_Rebuilt/.cproject
+/Liner_Car1_Rebuilt/.project
+/Liner_Car1_Rebuilt/.clangd
+/Liner_Car1_Rebuilt/.settings/
+
+# 忽略编译产物
+/Liner_Car1_Rebuilt/Debug/
+
+# 忽略备份
+/Liner_Car1_Rebuilt/*.bak
+
+# 忽略调试器配置
+/Liner_Car1_Rebuilt/targetConfigs/
+
+# 忽略 README
+/Liner_Car1_Rebuilt/README.md
