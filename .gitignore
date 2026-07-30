@@ -23,6 +23,19 @@
 !MSPM0G3507/Projects/24Hcar -MPU6050/
 !MSPM0G3507/Projects/24Hcar -MPU6050/**
 
+# Whitelist: zdt_MSPM0G3507 (ZDT Emm V5 stepper motor control)
+!MSPM0G3507/Projects/zdt_MSPM0G3507/
+!MSPM0G3507/Projects/zdt_MSPM0G3507/**
+# Exclude build artifacts
+MSPM0G3507/Projects/zdt_MSPM0G3507/Debug/
+MSPM0G3507/Projects/zdt_MSPM0G3507/Release/
+
 # Whitelist: ec_vision (MaixCAM2 vision framework)
 !ec_vision/
 !ec_vision/**
+
+# Whitelist: 26Hcar-BNO055 project (2026 H题巡线小车)
+!MSPM0G3507/Projects/26Hcar-BNO055/
+!MSPM0G3507/Projects/26Hcar-BNO055/**
+# Exclude Debug build artifacts
+MSPM0G3507/Projects/26Hcar-BNO055/Debug/
