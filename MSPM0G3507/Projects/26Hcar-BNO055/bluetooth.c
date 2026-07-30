@@ -10,9 +10,9 @@
 #define RX_TIMEOUT_MS 200U
 
 static char rx_buf[RX_BUF_SIZE];
-static uint8_t rx_idx;
-static bool rx_ready;
-static uint32_t rx_last_ms;
+static volatile uint8_t rx_idx;
+static volatile bool rx_ready;
+static volatile uint32_t rx_last_ms;
 static volatile uint32_t *bt_tick;
 
 static TuningParams_t g_params;
@@ -57,15 +57,27 @@ void UART_PB_INST_IRQHandler(void)
 
 void BT_Init(void)
 {
+    /* 1. 先清软件状态 */
     rx_idx = 0U;
     rx_ready = false;
     rx_last_ms = 0U;
     bt_tick = NULL;
     memset(&g_params, 0, sizeof(g_params));
+    memset(last_cmd, 0, sizeof(last_cmd));
+    last_cmd_ms = 0U;
 
-    DL_UART_Main_enableInterrupt(UART_PB_INST, DL_UART_MAIN_INTERRUPT_RX);
+    /* 2. 清硬件接收寄存器（最多读16次，防止无限循环） */
+    for (uint8_t i = 0; i < 16U; i++) {
+        if (DL_UART_getRawInterruptStatus(UART_PB_INST,
+                DL_UART_INTERRUPT_RX) == 0U) break;
+        (void)DL_UART_receiveData(UART_PB_INST);
+    }
+    DL_UART_clearInterruptStatus(UART_PB_INST, DL_UART_INTERRUPT_RX);
+
+    /* 3. 最后才开启中断 */
     NVIC_ClearPendingIRQ(UART_PB_INST_INT_IRQN);
     NVIC_EnableIRQ(UART_PB_INST_INT_IRQN);
+    DL_UART_Main_enableInterrupt(UART_PB_INST, DL_UART_MAIN_INTERRUPT_RX);
 }
 
 void BT_SetTickPtr(volatile uint32_t *tick_ptr)
@@ -80,35 +92,74 @@ void BT_Send(const char *str)
     }
 }
 
+static char bt_tx_buf[256];  /* 文件级静态缓冲区，不占栈空间 */
+
 void BT_Printf(const char *fmt, ...)
 {
-    char buf[256];
     va_list ap;
     int len;
 
     va_start(ap, fmt);
-    len = vsnprintf(buf, sizeof(buf), fmt, ap);
+    len = vsnprintf(bt_tx_buf, sizeof(bt_tx_buf), fmt, ap);
     va_end(ap);
 
     if (len < 0) {
         return;
     }
-    if (len > (int)sizeof(buf)) {
-        len = (int)sizeof(buf);
+    if (len >= (int)sizeof(bt_tx_buf)) {
+        len = (int)sizeof(bt_tx_buf) - 1;
     }
 
     for (int i = 0; i < len; i++) {
-        bt_send_char((uint8_t)buf[i]);
+        bt_send_char((uint8_t)bt_tx_buf[i]);
     }
 }
 
 void BT_SendParams(const TuningParams_t *p)
 {
-    BT_Printf("KP=%.2f KI=%.2f KD=%.2f BASE=%d LIM=%d TURN=%d MODE=%d FMIN=%.0f FMAX=%.0f STATE=%s\r\n",
-              p->KP, p->KI, Route_GetKd(), p->BASE_PWM, p->OUTPUT_LIM,
-              p->TURN_SPEED, (int)Route_GetMode(),
-              Route_GetFinishMinDist(), Route_GetFinishMaxDist(),
-              Route_GetStateName());
+    BT_Printf("M%d %s T%.1fs KP%.2f KD%.2f B%d L%d TR%d F%d-%d C%d Bk%d To%.1f La%.1f\r\n",
+              (int)Route_GetMode(),
+              Route_GetStateName(),
+              (float)Route_GetElapsedMs() / 1000.0f,
+              Route_GetKp(),
+              Route_GetKd(),
+              Route_GetBasePwm(),
+              Route_GetOutputLim(),
+              Route_GetTrim(),
+              (int)Route_GetFinishMinDist(),
+              (int)Route_GetFinishMaxDist(),
+              (int)Route_GetFinishConfirmTicks(),
+              (int)Route_GetBrakeDurationMs(),
+              (float)Route_GetTimeoutMs() / 1000.0f,
+              (float)Route_GetLapTargetMs() / 1000.0f);
+    /* 运行结束后输出结果 */
+    if (Route_IsFinished()) {
+        BT_Printf("RESULT=%s T=%.2f D=%.1f PD=%.1f PB=%d PT=%.2f RAW=0x%02X\r\n",
+                  Route_GetFinishReasonStr(),
+                  (float)Route_GetElapsedMs() / 1000.0f,
+                  Route_GetDistanceCm(),
+                  Route_GetPeakDist(),
+                  Route_GetPeakBc(),
+                  (float)Route_GetPeakMs() / 1000.0f,
+                  Route_GetPeakRaw());
+    }
+}
+
+/* 去掉首尾空格和 \r \n */
+static void trim_cmd(char *cmd)
+{
+    /* 去尾部空白和换行 */
+    int len = (int)strlen(cmd);
+    while (len > 0 && (cmd[len - 1] == ' ' || cmd[len - 1] == '\r' ||
+                       cmd[len - 1] == '\n' || cmd[len - 1] == '\t')) {
+        cmd[--len] = '\0';
+    }
+    /* 去首部空白 */
+    char *p = cmd;
+    while (*p == ' ' || *p == '\t') p++;
+    if (p != cmd) {
+        memmove(cmd, p, strlen(p) + 1);
+    }
 }
 
 static bool parse_cmd(const char *cmd, TuningParams_t *p)
@@ -168,6 +219,21 @@ static bool parse_cmd(const char *cmd, TuningParams_t *p)
         BT_Printf("OK BRAKE=%d\r\n", ival);
         return false;
     }
+    if (sscanf(cmd, "TOUT %f", &val) == 1) {
+        Route_SetTimeoutMs((uint32_t)(val * 1000.0f));
+        BT_Printf("OK TOUT=%.1fs\r\n", val);
+        return false;
+    }
+    if (sscanf(cmd, "LAP %f", &val) == 1) {
+        Route_SetLapTargetMs((uint32_t)(val * 1000.0f));
+        BT_Printf("OK LAP=%.1fs\r\n", val);
+        return false;
+    }
+    if (sscanf(cmd, "TRIM %d", &ival) == 1) {
+        Route_SetTrim((int16_t)ival);
+        BT_Printf("OK TRIM=%d\r\n", ival);
+        return false;
+    }
     if (sscanf(cmd, "TURN %d", &ival) == 1) {
         p->TURN_SPEED = (int16_t)ival;
         BT_Printf("OK TURN=%d\r\n", ival);
@@ -193,7 +259,7 @@ static bool parse_cmd(const char *cmd, TuningParams_t *p)
         return false;
     }
 
-    BT_Send("UNKNOWN CMD\r\n");
+    BT_Printf("UNKNOWN [%s]\r\n", cmd);
     return false;
 }
 
@@ -201,6 +267,7 @@ bool BT_Poll(TuningParams_t *params)
 {
     bool updated = false;
 
+    /* 超时成帧: 200ms 无换行则当作完整命令（兼容不发换行的蓝牙软件） */
     if ((rx_ready == false) && (rx_idx > 0U) && (bt_tick != NULL) &&
         ((*bt_tick - rx_last_ms) > RX_TIMEOUT_MS)) {
         rx_buf[rx_idx] = '\0';
@@ -210,6 +277,15 @@ bool BT_Poll(TuningParams_t *params)
 
     if (rx_ready) {
         rx_ready = false;
+
+        /* 去首尾空格和换行 */
+        trim_cmd(rx_buf);
+
+        /* 空命令不处理 */
+        if (rx_buf[0] == '\0') {
+            return false;
+        }
+
         /* 防止蓝牙回显导致重复处理 */
         if (bt_tick != NULL && strcmp(rx_buf, last_cmd) == 0 &&
             (*bt_tick - last_cmd_ms) < 100U) {

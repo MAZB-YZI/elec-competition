@@ -27,9 +27,9 @@
 static volatile float   g_KP         = 1.8f;   /* 位置比例 */
 static volatile float   g_KI         = 0.0f;   /* 位置积分 */
 static volatile float   g_KD         = 0.0f;   /* 位置微分 */
-static volatile int16_t g_BASE_PWM   = 700;    /* 直行基准 PWM */
+static volatile int16_t g_BASE_PWM   = 1200;   /* 直行基准 PWM */
 static volatile int16_t g_TURN_SPEED = 650;    /* 未使用，保留接口兼容 */
-static volatile int16_t g_OUTPUT_LIM = 1000;   /* 转向输出限幅 */
+static volatile int16_t g_OUTPUT_LIM = 1500;   /* 转向输出限幅 */
 
 /* ISR ↔ main 共享 */
 static volatile uint8_t  g_raw;          /* 灰度原始 8-bit */
@@ -46,11 +46,11 @@ static uint32_t   g_lost_cnt;            /* 丢线持续计数 */
 static int32_t    g_last_enc_l, g_last_enc_r; /* 编码器上次值 */
 static volatile int16_t g_speed_l, g_speed_r; /* 编码器速度 脉冲/秒 */
 static float      g_total_angle;              /* 全局累计角度 */
+
 static float      g_last_yaw_for_total;       /* 上次yaw，用于全局累计 */
-static uint32_t   g_run_start_ms;             /* Route 启动时的 ms_ticks */
-static uint32_t   g_run_elapsed_ms;           /* Route 运行耗时 */
 static bool       g_stop_mode_active;         /* STOP 模式下是否已按 START */
 static uint32_t   last_oled_ms;               /* 上次 OLED 刷新时间 */
+static DL_SYSCTL_RESET_CAUSE g_reset_cause;   /* 启动后立即保存，避免复位原因丢失 */
 
 /* ================================================================
  *  辅助
@@ -89,6 +89,27 @@ static void OLED_ShowBootStatus(const char *line)
     OLED_Refresh();
 }
 
+static const char *ResetCauseName(DL_SYSCTL_RESET_CAUSE cause)
+{
+    switch (cause) {
+    case DL_SYSCTL_RESET_CAUSE_POR_HW_FAILURE:
+    case DL_SYSCTL_RESET_CAUSE_BOR_SUPPLY_FAILURE:
+        return "POWER";
+    case DL_SYSCTL_RESET_CAUSE_POR_EXTERNAL_NRST:
+    case DL_SYSCTL_RESET_CAUSE_BOOTRST_EXTERNAL_NRST:
+        return "NRST";
+    case DL_SYSCTL_RESET_CAUSE_SYSRST_CPU_LOCKUP_VIOLATION:
+        return "LOCKUP";
+    case DL_SYSCTL_RESET_CAUSE_SYSRST_DEBUG_TRIGGERED:
+    case DL_SYSCTL_RESET_CAUSE_CPURST_DEBUG_TRIGGERED:
+        return "DEBUG";
+    case DL_SYSCTL_RESET_CAUSE_NO_RESET:
+        return "NONE";
+    default:
+        return "OTHER";
+    }
+}
+
 /* ================================================================
  *  TIMG6 ISR: 5ms 控制
  * ================================================================ */
@@ -113,31 +134,22 @@ void CTRL_TIMER_INST_IRQHandler(void)
 
         uint8_t raw  = GraySensor_Read();
 
-        /* ---- 处理 START/STOP 请求 (STOP 优先) ---- */
-        if (g_route_stop_request) {
-            g_route_stop_request = false;
-            g_stop_mode_active = false;
-            Motor_Stop();
-            /* 冻结计时 */
-            if (g_run_start_ms > 0U)
-                g_run_elapsed_ms = g_ms_ticks - g_run_start_ms;
-        }
-        if (g_route_start_request) {
-            g_route_start_request = false;
-            g_run_start_ms = g_ms_ticks;
-            g_run_elapsed_ms = 0;
-            if (Route_GetMode() == ROUTE_MODE_STOP) {
+        /* ---- STOP 模式: 自行处理 START/STOP (Route 不处理 MODE_STOP) ---- */
+        if (Route_GetMode() == ROUTE_MODE_STOP) {
+            if (g_route_stop_request) {
+                g_route_stop_request = false;
+                g_stop_mode_active = false;
+                Motor_Stop();
+            }
+            if (g_route_start_request) {
+                g_route_start_request = false;
                 g_stop_mode_active = true;
             }
         }
 
-        /* ---- Route 状态机 (route_fsm.c 内部读灰度+控电机) ---- */
-        if (Route_Update5ms(yaw, raw)) {
+        /* ---- Route 状态机 (内部处理 START/STOP + 计时) ---- */
+        if (Route_Update5ms(g_ms_ticks, yaw, raw)) {
             g_steer = Route_GetLineSteer();
-            /* 更新运行计时 */
-            if (Route_IsActive() && g_run_start_ms > 0U) {
-                g_run_elapsed_ms = g_ms_ticks - g_run_start_ms;
-            }
         }
 
         /* ---- Route 不活跃: STOP 模式下跑普通巡线 (需按 START) ---- */
@@ -197,6 +209,8 @@ void CTRL_TIMER_INST_IRQHandler(void)
         g_new_data = true;
         break;
     }
+    default:
+        break;
     }
 }
 
@@ -210,6 +224,7 @@ void UART0_IRQHandler(void) { JY61P_UART_IRQHandler(); }
  * ================================================================ */
 int main(void)
 {
+    g_reset_cause = DL_SYSCTL_getResetCause();
     SYSCFG_DL_init();
     Motor_Init();
     Buzzer_Init();
@@ -220,8 +235,6 @@ int main(void)
     g_gyro_ok = false;
     g_gyro_frames = 0U;
     g_stop_mode_active = false;
-    g_run_start_ms = 0;
-    g_run_elapsed_ms = 0;
     last_oled_ms = 0;
     BT_Init();
     BT_SetTickPtr(&g_ms_ticks);
@@ -257,7 +270,8 @@ int main(void)
 
     NVIC_EnableIRQ(CTRL_TIMER_INST_INT_IRQN);
     NVIC_EnableIRQ(ENCODER_INT_IRQN);
-    BT_Send("LinerCar Ready\r\n");
+    BT_Printf("LinerCar Ready RST=%s(%u)\r\n",
+              ResetCauseName(g_reset_cause), (unsigned)g_reset_cause);
 
     TuningParams_t bt_params = { g_KP, g_KI, g_BASE_PWM, g_TURN_SPEED, g_OUTPUT_LIM };
     uint32_t last_bno_ms = g_ms_ticks;
@@ -319,7 +333,7 @@ int main(void)
 
             /* 行2 y=26: 运行时间 + 模式 */
             OLED_ShowString(0, 26, "T", 12);
-            uint32_t sec_x100 = g_run_elapsed_ms / 10U;
+            uint32_t sec_x100 = Route_GetElapsedMs() / 10U;
             OLED_ShowNum(8, 26, sec_x100 / 100, 2, 12);
             OLED_ShowString(20, 26, ".", 12);
             OLED_ShowNum(26, 26, sec_x100 % 100, 2, 12);
