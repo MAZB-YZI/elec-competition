@@ -1,0 +1,27 @@
+{
+    "configurations": [
+        {
+            "name": "MSPM0G3507",
+            "includePath": [
+                "${workspaceFolder}",
+                "${workspaceFolder}/bsp",
+                "${workspaceFolder}/app",
+                "${workspaceFolder}/calibration",
+                "${workspaceFolder}/Control",
+                "${workspaceFolder}/Modules/Drivers/ZDT_EMM_V5",
+                "${workspaceFolder}/../../Modules/BSP",
+                "${workspaceFolder}/../../Modules/Drivers/OLED",
+                "d:/TI/SDK/mspm0_sdk_2_10_00_04/source",
+                "d:/TI/SDK/mspm0_sdk_2_10_00_04/source/third_party/CMSIS/Core/Include"
+            ],
+            "defines": [
+                "__MSPM0G3507__"
+            ],
+            "compilerPath": "C:/ti/ccs2100/ccs/tools/compiler/ti-cgt-arm_20.2.7.LTS/bin/armcl.exe",
+            "cStandard": "c11",
+            "cppStandard": "c++14",
+            "intelliSenseMode": "gcc-arm"
+        }
+    ],
+    "version": 4
+}
