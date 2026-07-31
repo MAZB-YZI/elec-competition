@@ -15,67 +15,7 @@
 #include "ir_sensor.h"
 #include "buzzer.h"
 #include "route_fsm.h"
-
-/* ========== 按键 ========== */
-#define BTN_COUNT       4
-#define BTN_DEBOUNCE    3       /* 30ms 消抖 */
-#define BTN_K1          0       /* PB1  - 上一题 */
-#define BTN_K2          1       /* PB10 - 下一题 */
-#define BTN_K3          2       /* PB11 - START */
-#define BTN_K4          3       /* PB14 - STOP */
-
-static const struct { GPIO_Regs *port; uint32_t pin; uint32_t iomux; } g_btn[BTN_COUNT] = {
-    { GPIOB, DL_GPIO_PIN_1,  IOMUX_PINCM13 },
-    { GPIOB, DL_GPIO_PIN_10, IOMUX_PINCM27 },
-    { GPIOB, DL_GPIO_PIN_11, IOMUX_PINCM28 },
-    { GPIOB, DL_GPIO_PIN_14, IOMUX_PINCM31 },
-};
-static uint8_t g_btn_deb[BTN_COUNT];
-static bool    g_btn_pressed[BTN_COUNT];
-static bool    g_btn_event[BTN_COUNT];
-
-static void Buttons_Init(void)
-{
-    for (uint8_t i = 0; i < BTN_COUNT; i++) {
-        /* 1. 关闭输出使能 */
-        DL_GPIO_disableOutput(g_btn[i].port, g_btn[i].pin);
-        /* 2. 配置引脚复用为 GPIO 输入上拉 */
-        DL_GPIO_initDigitalInputFeatures(
-            g_btn[i].iomux, DL_GPIO_INVERSION_DISABLE,
-            DL_GPIO_RESISTOR_PULL_UP, DL_GPIO_HYSTERESIS_DISABLE,
-            DL_GPIO_WAKEUP_DISABLE);
-        /* 3. 清除输出使能位（确保为输入） */
-        g_btn[i].port->DOECLR31_0 = g_btn[i].pin;
-        g_btn_deb[i] = 0;
-        g_btn_pressed[i] = false;
-        g_btn_event[i] = false;
-    }
-}
-
-static void Buttons_Scan(void)
-{
-    for (uint8_t i = 0; i < BTN_COUNT; i++) {
-        bool raw_low = !DL_GPIO_readPins(g_btn[i].port, g_btn[i].pin);
-        if (raw_low) {
-            if (g_btn_deb[i] < BTN_DEBOUNCE) g_btn_deb[i]++;
-            if (g_btn_deb[i] >= BTN_DEBOUNCE && !g_btn_pressed[i]) {
-                g_btn_pressed[i] = true;
-                g_btn_event[i] = true;
-            }
-        } else {
-            g_btn_deb[i] = 0;
-            g_btn_pressed[i] = false;
-        }
-    }
-}
-
-static bool Button_IsPressed(uint8_t btn)
-{
-    if (btn >= BTN_COUNT) return false;
-    bool e = g_btn_event[btn];
-    g_btn_event[btn] = false;
-    return e;
-}
+#include "key.h"
 
 /* ========== 常量 ========== */
 #define LEFT_ENCODER_DIR   1      /* 左轮编码器方向系数 */
@@ -94,7 +34,6 @@ static volatile int16_t g_speed_l, g_speed_r; /* 编码器速度 脉冲/秒 */
 static float      g_total_angle;              /* 全局累计角度 */
 static float      g_last_yaw_for_total;       /* 上次yaw，用于全局累计 */
 static uint32_t   last_oled_ms;               /* 上次 OLED 刷新时间 */
-static uint32_t   last_btn_ms;               /* 上次按键扫描时间 */
 static DL_SYSCTL_RESET_CAUSE g_reset_cause;   /* 启动后立即保存，避免复位原因丢失 */
 
 /* 题目选择 */
@@ -173,6 +112,7 @@ void CTRL_TIMER_INST_IRQHandler(void)
     switch (DL_Timer_getPendingInterrupt(CTRL_TIMER_INST)) {
     case DL_TIMER_IIDX_LOAD: {
         g_ms_ticks += 5U;
+        Key_Scan5ms();
         /* 编码器测速（方向归一化：前进时都为正） */
         int32_t enc_l = Encoder_GetLeftCount();
         int32_t enc_r = Encoder_GetRightCount();
@@ -227,7 +167,7 @@ int main(void)
     last_oled_ms = 0;
     BT_Init();
     BT_SetTickPtr(&g_ms_ticks);
-    Buttons_Init();
+    Key_Init();
 
     OLED_ShowBootStatus("JY61P INIT...");
     JY61P_Init();
@@ -266,7 +206,6 @@ int main(void)
 
     uint32_t last_bno_ms = g_ms_ticks;
     uint32_t last_tel_ms = g_ms_ticks;
-    last_btn_ms = g_ms_ticks;
 
     while (1) {
         uint32_t now = g_ms_ticks;
@@ -281,37 +220,32 @@ int main(void)
         /* 蓝牙命令处理 */
         BT_Poll();
 
-        /* 按键扫描（每 10ms） */
-        if ((now - last_btn_ms) >= 10U) {
-            last_btn_ms = now;
-            Buttons_Scan();
+        /* 按键处理 */
+        /* K4 = STOP（任何状态有效） */
+        if (Key_GetPressEvent(KEY_ID_K4)) {
+            g_route_stop_request = true;
+        }
 
-            /* K4 = STOP（任何状态有效） */
-            if (Button_IsPressed(BTN_K4)) {
-                g_route_stop_request = true;
+        /* K3 = START（仅待机状态有效） */
+        if (Key_GetPressEvent(KEY_ID_K3)) {
+            if (!Route_IsActive()) {
+                Route_SetMode(g_question_modes[g_current_question]);
+                g_route_start_request = true;
             }
+        }
 
-            /* K3 = START（仅待机状态有效） */
-            if (Button_IsPressed(BTN_K3)) {
-                if (!Route_IsActive()) {
-                    Route_SetMode(g_question_modes[g_current_question]);
-                    g_route_start_request = true;
-                }
+        /* K1 = 上一题（仅待机状态） */
+        if (Key_GetPressEvent(KEY_ID_K1)) {
+            if (!Route_IsActive()) {
+                if (g_current_question > 0) g_current_question--;
+                else g_current_question = QUESTION_COUNT - 1;
             }
+        }
 
-            /* K1 = 上一题（仅待机状态） */
-            if (Button_IsPressed(BTN_K1)) {
-                if (!Route_IsActive()) {
-                    if (g_current_question > 0) g_current_question--;
-                    else g_current_question = QUESTION_COUNT - 1;
-                }
-            }
-
-            /* K2 = 下一题（仅待机状态） */
-            if (Button_IsPressed(BTN_K2)) {
-                if (!Route_IsActive()) {
-                    g_current_question = (g_current_question + 1) % QUESTION_COUNT;
-                }
+        /* K2 = 下一题（仅待机状态） */
+        if (Key_GetPressEvent(KEY_ID_K2)) {
+            if (!Route_IsActive()) {
+                g_current_question = (g_current_question + 1) % QUESTION_COUNT;
             }
         }
 
