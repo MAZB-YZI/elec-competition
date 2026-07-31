@@ -259,6 +259,7 @@ int main(void)
     OLED_Refresh();
 
     NVIC_EnableIRQ(CTRL_TIMER_INST_INT_IRQN);
+    DL_TimerG_startCounter(CTRL_TIMER_INST);
     NVIC_EnableIRQ(ENCODER_INT_IRQN);
     BT_Printf("LinerCar Ready RST=%s(%u)\r\n",
               ResetCauseName(g_reset_cause), (unsigned)g_reset_cause);

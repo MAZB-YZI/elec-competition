@@ -49,12 +49,12 @@
 #define Q4_SLOW_PWM             400    /* 接近B时降速到此值 */
 
 /* Q5 默认值 */
-#define DEFAULT_Q5_PWM          950
-#define DEFAULT_Q5_RAMP_MS      3000U
+#define DEFAULT_Q5_PWM          900
+#define DEFAULT_Q5_RAMP_MS      4000U
 #define DEFAULT_Q5_OFFSET_CM    8.0f
 #define DEFAULT_Q5_POST_CM      25.0f
 #define DEFAULT_Q5_STOP_MS      1500U
-#define DEFAULT_Q5_TIMEOUT_MS   29000U
+#define DEFAULT_Q5_TIMEOUT_MS   29500U
 #define DEFAULT_Q5_DETECT_MIN   20000U  /* 20s */
 #define DEFAULT_Q5_DETECT_MAX   28500U  /* 28.5s */
 #define Q5_START_PWM            100
@@ -837,7 +837,7 @@ bool Route_Update5ms(uint32_t now_ms, float yaw_deg, uint8_t gray_raw)
         g_q5_brake_ticks++;
         g_run_elapsed_ms = g_q5_lap_time_ms;
 
-        int16_t pwm = g_BASE_PWM - (int16_t)((float)g_BASE_PWM *
+        int16_t pwm = g_q5_pwm - (int16_t)((float)g_q5_pwm *
             (float)g_q5_brake_ticks / (float)(g_q5_stop_ms / 5U));
         if (pwm < 0) pwm = 0;
 
@@ -927,12 +927,12 @@ void Route_Init(void)
     g_q4_hkp = 4.0f;
     g_q4_hlim = 120;
 
-    g_q5_pwm           = DEFAULT_Q5_PWM;
-    g_q5_ramp_ms       = DEFAULT_Q5_RAMP_MS;
+    g_q5_pwm           = 900;
+    g_q5_ramp_ms       = 4000U;
     g_q5_offset_cm     = DEFAULT_Q5_OFFSET_CM;
     g_q5_post_cm       = DEFAULT_Q5_POST_CM;
     g_q5_stop_ms       = DEFAULT_Q5_STOP_MS;
-    g_q5_timeout_ms    = DEFAULT_Q5_TIMEOUT_MS;
+    g_q5_timeout_ms    = 29500U;
     g_q5_detect_min_ms = DEFAULT_Q5_DETECT_MIN;
     g_q5_detect_max_ms = DEFAULT_Q5_DETECT_MAX;
     g_q5_start_ms = 0; g_q5_a_detect_dist = 0;
