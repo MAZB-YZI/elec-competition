@@ -21,6 +21,23 @@
 #define LEFT_ENCODER_DIR   1      /* 左轮编码器方向系数 */
 #define RIGHT_ENCODER_DIR -1     /* 右轮编码器方向系数，右轮安装反向 */
 
+/* ========== Q5 单字节加速度前馈链路 ==========
+ * UART_CONSOLE TX: PA23, 115200, 8N1 -> MaixCAM2 UART4 RX(A22).
+ * bit7: 1=直道, 0=弯道; bit6..0: 纵向加速度线性映射到 0..127.
+ *
+ * 当前按实物判断采用“车头方向 = IMU -Y”。如果实车前推测试的符号
+ * 相反，只需把 FF_FORWARD_AXIS_SIGN 改为 +1.0f。
+ */
+#define FF_TX_PERIOD_MS             20U
+#define FF_ACCEL_RANGE_MPS2         4.0f
+#define FF_ACCEL_FILTER_ALPHA       0.35f
+#define FF_ACCEL_BIAS_ALPHA         0.02f
+#define FF_FORWARD_AXIS_SIGN       (-1.0f)
+
+#define Q5_STRAIGHT_CM              150.0f
+#define Q5_CURVE_CM                 157.08f
+#define Q5_ROUTE_GUARD_CM             5.0f
+
 /* ISR ↔ main 共享 */
 static volatile uint8_t  g_raw;          /* 灰度原始 8-bit */
 static volatile int16_t  g_steer;        /* 当前转向修正量 */
@@ -35,6 +52,16 @@ static float      g_total_angle;              /* 全局累计角度 */
 static float      g_last_yaw_for_total;       /* 上次yaw，用于全局累计 */
 static uint32_t   last_oled_ms;               /* 上次 OLED 刷新时间 */
 static DL_SYSCTL_RESET_CAUSE g_reset_cause;   /* 启动后立即保存，避免复位原因丢失 */
+
+/* Q5 前馈发送状态。待机时估计静态零偏，运行时冻结。 */
+static float      g_ff_accel_bias_mps2;
+static volatile float g_ff_accel_filtered_mps2;
+static bool       g_ff_bias_valid;
+static volatile uint8_t    g_ff_last_byte;
+static volatile bool       g_ff_last_straight;
+static volatile uint32_t   g_ff_tx_count;
+static volatile uint32_t   g_ff_drop_count;
+static uint8_t    g_ff_div;               /* 5ms 分频计数 */
 
 /* 题目选择 */
 static const RouteMode_t g_question_modes[] = {
@@ -62,6 +89,102 @@ static int16_t clamp_pwm(int32_t value)
     if (value > MOTOR_PWM_MAX) return MOTOR_PWM_MAX;
     if (value < MOTOR_PWM_MIN) return MOTOR_PWM_MIN;
     return (int16_t)value;
+}
+
+static float clamp_f(float value, float lo, float hi)
+{
+    if (value < lo) return lo;
+    if (value > hi) return hi;
+    return value;
+}
+
+static float FF_ReadForwardAccelMps2(void)
+{
+    return FF_FORWARD_AXIS_SIGN * JY61P_GetAccelYMps2();
+}
+
+static bool FF_Q5IsStraight(void)
+{
+    if (Route_GetMode() != ROUTE_MODE_Q5_LAP || !Route_IsActive()) {
+        return true;
+    }
+
+    const float d = Encoder_GetAverageDistanceCm();
+    const float straight1_end = Q5_STRAIGHT_CM - Q5_ROUTE_GUARD_CM;
+    const float straight2_start = Q5_STRAIGHT_CM + Q5_CURVE_CM +
+                                  Q5_ROUTE_GUARD_CM;
+    const float straight2_end = 2.0f * Q5_STRAIGHT_CM + Q5_CURVE_CM -
+                                Q5_ROUTE_GUARD_CM;
+
+    return (d < straight1_end) ||
+           (d >= straight2_start && d < straight2_end);
+}
+
+static uint8_t FF_EncodeByte(float accel_mps2, bool is_straight)
+{
+    float a = clamp_f(accel_mps2,
+                      -FF_ACCEL_RANGE_MPS2, FF_ACCEL_RANGE_MPS2);
+    int32_t q;
+
+    /* code=64 精确表示0；负半轴64级，正半轴63级。 */
+    if (a <= 0.0f) {
+        q = (int32_t)(64.0f +
+            a * (64.0f / FF_ACCEL_RANGE_MPS2) + 0.5f);
+    } else {
+        q = 64 + (int32_t)(a * (63.0f / FF_ACCEL_RANGE_MPS2) + 0.5f);
+    }
+
+    if (q < 0) q = 0;
+    if (q > 127) q = 127;
+    return (uint8_t)((is_straight ? 0x80U : 0x00U) |
+                     ((uint8_t)q & 0x7FU));
+}
+
+static void FF_SendByte(uint8_t byte)
+{
+    /* 非阻塞单次尝试，ISR 中不能循环等待 */
+    if (DL_UART_Main_transmitDataCheck(UART_CONSOLE_INST, byte)) {
+        g_ff_tx_count++;
+        g_ff_last_byte = byte;
+    } else {
+        g_ff_drop_count++;
+    }
+}
+
+static void FF_UpdateAndSend(void)
+{
+    float sample = 0.0f;
+
+    /* 新鲜度检查: 超过 200ms 没收到 0x51 → 立即归零 */
+    bool accel_fresh = JY61P_IsAccelFresh();
+
+    if (!accel_fresh) {
+        /* 失效: 立即归零，不经过滤波衰减 */
+        g_ff_accel_filtered_mps2 = 0.0f;
+    } else if (JY61P_HasAcceleration()) {
+        float sample = FF_ReadForwardAccelMps2();
+
+        if (!Route_IsActive()) {
+            if (!g_ff_bias_valid) {
+                g_ff_accel_bias_mps2 = sample;
+                g_ff_bias_valid = true;
+            } else {
+                g_ff_accel_bias_mps2 += FF_ACCEL_BIAS_ALPHA *
+                    (sample - g_ff_accel_bias_mps2);
+            }
+        }
+
+        if (g_ff_bias_valid) sample -= g_ff_accel_bias_mps2;
+
+        sample = clamp_f(sample,
+                         -FF_ACCEL_RANGE_MPS2, FF_ACCEL_RANGE_MPS2);
+        g_ff_accel_filtered_mps2 += FF_ACCEL_FILTER_ALPHA *
+            (sample - g_ff_accel_filtered_mps2);
+    }
+
+    g_ff_last_straight = FF_Q5IsStraight();
+    FF_SendByte(FF_EncodeByte(g_ff_accel_filtered_mps2,
+                              g_ff_last_straight));
 }
 
 static void OLED_ShowSigned4(uint8_t x, uint8_t y, int32_t value)
@@ -112,7 +235,14 @@ void CTRL_TIMER_INST_IRQHandler(void)
     switch (DL_Timer_getPendingInterrupt(CTRL_TIMER_INST)) {
     case DL_TIMER_IIDX_LOAD: {
         g_ms_ticks += 5U;
+        JY61P_UpdateTick();
         Key_Scan5ms();
+
+        /* 前馈发送: 4 分频 = 20ms / 50Hz */
+        if (++g_ff_div >= 4U) {
+            g_ff_div = 0;
+            FF_UpdateAndSend();
+        }
         /* 编码器测速（方向归一化：前进时都为正） */
         int32_t enc_l = Encoder_GetLeftCount();
         int32_t enc_r = Encoder_GetRightCount();
@@ -164,6 +294,14 @@ int main(void)
     g_total_angle = 0.0f;
     g_gyro_ok = false;
     g_gyro_frames = 0U;
+    g_ff_accel_bias_mps2 = 0.0f;
+    g_ff_accel_filtered_mps2 = 0.0f;
+    g_ff_bias_valid = false;
+    g_ff_last_byte = 0xC0U;
+    g_ff_last_straight = true;
+    g_ff_tx_count = 0U;
+    g_ff_drop_count = 0U;
+    g_ff_div = 0U;
     last_oled_ms = 0;
     BT_Init();
     BT_SetTickPtr(&g_ms_ticks);
@@ -201,8 +339,11 @@ int main(void)
     NVIC_EnableIRQ(CTRL_TIMER_INST_INT_IRQN);
     DL_TimerG_startCounter(CTRL_TIMER_INST);
     NVIC_EnableIRQ(ENCODER_INT_IRQN);
-    BT_Printf("LinerCar Ready RST=%s(%u)\r\n",
-              ResetCauseName(g_reset_cause), (unsigned)g_reset_cause);
+    BT_Printf("LinerCar Ready RST=%s(%u) FF=PA23/115200 AXIS=-Y "
+              "RANGE=+/-%.1fmps2 A51=%lu\r\n",
+              ResetCauseName(g_reset_cause), (unsigned)g_reset_cause,
+              (double)FF_ACCEL_RANGE_MPS2,
+              (unsigned long)JY61P_GetAccelFrameCount());
 
     uint32_t last_bno_ms = g_ms_ticks;
     uint32_t last_tel_ms = g_ms_ticks;
@@ -253,6 +394,16 @@ int main(void)
         if (BT_GetTelPeriod() > 0 && (now - last_tel_ms) >= BT_GetTelPeriod()) {
             last_tel_ms = now;
             BT_Telemetry(g_raw, g_speed_l, g_speed_r, g_yaw);
+            BT_Printf("FF AFWD=%.3f FILT=%.3f ROUTE=%c BYTE=0x%02X "
+                      "A51=%lu TX=%lu DROP=%lu FRESH=%u\r\n",
+                      (double)FF_ReadForwardAccelMps2(),
+                      (double)g_ff_accel_filtered_mps2,
+                      g_ff_last_straight ? 'S' : 'C',
+                      (unsigned)g_ff_last_byte,
+                      (unsigned long)JY61P_GetAccelFrameCount(),
+                      (unsigned long)g_ff_tx_count,
+                      (unsigned long)g_ff_drop_count,
+                      (unsigned)JY61P_IsAccelFresh());
         }
 
         /* OLED: 固定 100ms 刷新 */
