@@ -10,7 +10,7 @@
 #include "motor.h"
 
 /* ── 默认值 ── */
-#define DEFAULT_KP              1.80f
+#define DEFAULT_KP              1.00f
 #define DEFAULT_KD              0.00f
 #define DEFAULT_BASE_PWM        1200
 #define DEFAULT_OUTPUT_LIM      1500
@@ -36,12 +36,13 @@
 
 /* Q4 默认值 */
 #define DEFAULT_Q4_PWM          1000
-#define DEFAULT_Q4_RAMP_MS      800U
+#define DEFAULT_Q4_RAMP_MS      4000U
 #define DEFAULT_Q4_ARM_CM       120.0f
 #define DEFAULT_Q4_B_CM         145.0f
 #define DEFAULT_Q4_YAW_DEG      4.0f
-#define DEFAULT_Q4_POST_CM      25.0f
-#define DEFAULT_Q4_STOP_MS      800U
+#define DEFAULT_Q4_POST_CM      50.0f
+#define DEFAULT_Q4_STOP_MS      2000U
+#define Q4_START_PWM            100
 
 /* Q5 默认值 */
 #define DEFAULT_Q5_RAMP_MS      1000U
@@ -73,7 +74,9 @@ typedef enum {
     Q5_STATE_CROSS_WAIT,
     Q5_STATE_POST_A,
     Q5_STATE_BRAKE,
-    Q5_STATE_DONE
+    Q5_STATE_DONE,
+    /* 标定模式 */
+    CAL_STATE_RUNNING
 } RouteState_t;
 
 /* ── 请求标志 ── */
@@ -321,6 +324,12 @@ bool Route_Update5ms(uint32_t now_ms, float yaw_deg, uint8_t gray_raw)
             g_finish_armed = false;
             g_finish_black_ticks = 0;
             Buzzer_Beep(POINT_BEEP_MS);
+        } else if (g_mode == ROUTE_MODE_CALIBRATE) {
+            g_state = CAL_STATE_RUNNING;
+            Encoder_ResetDistance();
+            g_run_start_ms = now_ms;
+            g_run_elapsed_ms = 0;
+            Buzzer_Beep(POINT_BEEP_MS);
         } else {
             g_state = ROUTE_STATE_STOPPED;
         }
@@ -521,13 +530,26 @@ bool Route_Update5ms(uint32_t now_ms, float yaw_deg, uint8_t gray_raw)
     {
         uint32_t elapsed = now_ms - g_q4_start_ms;
         g_run_elapsed_ms = elapsed;
-        int16_t pwm = (int16_t)((float)g_q4_pwm * (float)elapsed / (float)g_q4_ramp_ms);
+
+        /* 二次缓出曲线: 前快后慢 */
+        float x = (float)elapsed / (float)g_q4_ramp_ms;
+        if (x > 1.0f) x = 1.0f;
+        float ratio = 2.0f * x - x * x;  /* 2x - x² */
+        int16_t pwm = Q4_START_PWM +
+            (int16_t)((g_q4_pwm - Q4_START_PWM) * ratio);
         if (pwm > g_q4_pwm) pwm = g_q4_pwm;
+
         /* 巡线 */
         LineFollow_Update(gray_raw);
-        /* 覆盖电机输出为 ramp pwm */
-        Motor_SetLeftSpeed(ClampPwm((int32_t)pwm + g_line_steer + g_TRIM));
-        Motor_SetRightSpeed(ClampPwm((int32_t)pwm - g_line_steer - g_TRIM));
+
+        /* 斜坡期间限制转向量为 PWM 的 50% */
+        int16_t ramp_steer = g_line_steer;
+        int16_t steer_limit = pwm / 2;
+        if (ramp_steer > steer_limit) ramp_steer = steer_limit;
+        if (ramp_steer < -steer_limit) ramp_steer = -steer_limit;
+
+        Motor_SetLeftSpeed(ClampPwm((int32_t)pwm + ramp_steer + g_TRIM));
+        Motor_SetRightSpeed(ClampPwm((int32_t)pwm - ramp_steer - g_TRIM));
         if (elapsed >= g_q4_ramp_ms) {
             g_state = Q4_STATE_AB_RUN;
         }
@@ -917,6 +939,12 @@ bool Route_Update5ms(uint32_t now_ms, float yaw_deg, uint8_t gray_raw)
         g_run_elapsed_ms = g_q5_lap_time_ms;
         return true;
 
+    /* ── 标定模式: 电机不动，手推，读编码器 ── */
+    case CAL_STATE_RUNNING:
+        Motor_Stop();  /* 确保电机不输出，方便手推 */
+        g_run_elapsed_ms = now_ms - g_run_start_ms;
+        return true;
+
     default:
         Motor_Stop();
         g_state = ROUTE_STATE_STOPPED;
@@ -934,7 +962,7 @@ void Route_Init(void)
 
     g_run_start_ms = 0; g_run_elapsed_ms = 0; g_run_finish_ms = 0;
 
-    g_KP         = DEFAULT_KP;
+    g_KP         = 1.00f;
     g_KD         = DEFAULT_KD;
     g_BASE_PWM   = DEFAULT_BASE_PWM;
     g_OUTPUT_LIM = DEFAULT_OUTPUT_LIM;
@@ -1005,7 +1033,7 @@ void Route_Stop(void)
  * ================================================================ */
 void Route_SetMode(RouteMode_t mode)
 {
-    if ((int)mode >= 0 && (int)mode <= (int)ROUTE_MODE_Q5_LAP) g_mode = mode;
+    if ((int)mode >= 0 && (int)mode <= (int)ROUTE_MODE_CALIBRATE) g_mode = mode;
 }
 RouteMode_t Route_GetMode(void) { return g_mode; }
 
@@ -1081,7 +1109,8 @@ bool Route_IsActive(void)
             g_state == Q5_STATE_FOLLOW ||
             g_state == Q5_STATE_CROSS_WAIT ||
             g_state == Q5_STATE_POST_A ||
-            g_state == Q5_STATE_BRAKE);
+            g_state == Q5_STATE_BRAKE ||
+            g_state == CAL_STATE_RUNNING);
 }
 
 bool Route_IsFinished(void)
@@ -1115,6 +1144,7 @@ const char *Route_GetStateName(void)
     case Q5_STATE_POST_A:         return "5PST";
     case Q5_STATE_BRAKE:          return "5BRK";
     case Q5_STATE_DONE:           return "5DNE";
+    case CAL_STATE_RUNNING:       return "CAL ";
     default:                      return "????";
     }
 }
@@ -1142,7 +1172,7 @@ float    Route_GetPeakDist(void)  { return g_peak_dist; }
  *  Q4 参数
  * ================================================================ */
 void  Route_SetQ4Pwm(int16_t v)      { if (v < 0) v = 0; if (v > MOTOR_PWM_MAX) v = MOTOR_PWM_MAX; g_q4_pwm = v; }
-void  Route_SetQ4RampMs(uint16_t v)  { if (v < 100) v = 100; if (v > 3000) v = 3000; g_q4_ramp_ms = v; }
+void  Route_SetQ4RampMs(uint16_t v)  { if (v < 100) v = 100; if (v > 5000) v = 5000; g_q4_ramp_ms = v; }
 void  Route_SetQ4ArmCm(float v)      { if (v < 50) v = 50; if (v > 300) v = 300; g_q4_arm_cm = v; }
 void  Route_SetQ4BCm(float v)        { if (v < 50) v = 50; if (v > 300) v = 300; g_q4_b_cm = v; }
 void  Route_SetQ4YawDeg(float v)     { if (v < 1) v = 1; if (v > 90) v = 90; g_q4_yaw_deg = v; }

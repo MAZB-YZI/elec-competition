@@ -11,7 +11,8 @@ typedef enum {
     ROUTE_MODE_H_LAP      = 2,  /* 第二问：一圈停车 */
     ROUTE_MODE_FINISH_TEST = 3, /* A线测试 */
     ROUTE_MODE_Q4_AB      = 4,  /* 第四问：A→B */
-    ROUTE_MODE_Q5_LAP     = 5   /* 第五问：一圈通过A */
+    ROUTE_MODE_Q5_LAP     = 5,  /* 第五问：一圈通过A */
+    ROUTE_MODE_CALIBRATE  = 6   /* 编码器里程标定 */
 } RouteMode_t;
 
 /* ── 结束原因 ── */

@@ -138,6 +138,13 @@ void BT_SendParams(void)
                   Route_GetPeakBc(), (float)Route_GetPeakMs() / 1000.0f,
                   Route_GetPeakDist(), Route_GetPeakRaw());
     }
+
+    /* 标定模式: 显示编码器详情 */
+    if (Route_GetMode() == ROUTE_MODE_CALIBRATE) {
+        float dist = Route_GetDistanceCm();
+        BT_Printf("CAL D=%.1f T=%.1f\r\n", dist,
+                  (float)Route_GetElapsedMs() / 1000.0f);
+    }
 }
 
 /* ── HELP ── */
@@ -148,7 +155,7 @@ static void BT_SendHelp(void)
     BT_Send("TIME: LAP TW SLOWR SLOWA FBA TOUT\r\n");
     BT_Send("Q4  : Q4PWM Q4RAMP Q4ARM Q4B Q4YAW Q4POST Q4STOP\r\n");
     BT_Send("Q5  : Q5RAMP Q5OFFSET Q5POST Q5STOP Q5TOUT\r\n");
-    BT_Send("CTRL: MODE START STOP SHOW HELP\r\n");
+    BT_Send("CTRL: MODE START STOP SHOW HELP ZERO\r\n");
     BT_Send("TEL : TEL 100 / TEL 0\r\n");
 }
 
@@ -177,6 +184,7 @@ static void parse_cmd(const char *cmd)
         g_route_stop_request = true; BT_Send("STOP OK\r\n"); return;
     }
     if (strcmp(cmd, "SHOW") == 0) { BT_SendParams(); return; }
+    if (strcmp(cmd, "ZERO") == 0) { Encoder_ResetDistance(); BT_Send("ZERO OK\r\n"); return; }
     if (strcmp(cmd, "HELP") == 0) { BT_SendHelp(); return; }
     if (strcmp(cmd, "hello") == 0) { BT_Send("receive:hello\r\n"); return; }
 
