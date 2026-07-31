@@ -1,0 +1,77 @@
+[
+   {
+      "directory" : "D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug",
+      "command"   : "clang++ -D__MSPM0G3507__ -D__USE_SYSCONFIG__ -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN\" -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug\" -I\"D:/TI_MSPM0/mspm0_sdk_2_10_00_04/source/third_party/CMSIS/Core/Include\" -I\"D:/TI_MSPM0/mspm0_sdk_2_10_00_04/source\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/armv7em-ti-none-eabihf/c++/v1\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/c++/v1\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/lib/clang/22/include\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/c\" -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug/syscfg\" -xc",
+      "file"      : "D:/TI_MSPM0/CCS_Workspace/BUJIN/bluetooth.c"
+   },
+   {
+      "directory" : "D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug",
+      "command"   : "clang++ -D__MSPM0G3507__ -D__USE_SYSCONFIG__ -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN\" -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug\" -I\"D:/TI_MSPM0/mspm0_sdk_2_10_00_04/source/third_party/CMSIS/Core/Include\" -I\"D:/TI_MSPM0/mspm0_sdk_2_10_00_04/source\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/armv7em-ti-none-eabihf/c++/v1\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/c++/v1\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/lib/clang/22/include\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/c\" -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug/syscfg\" -xc",
+      "file"      : "D:/TI_MSPM0/CCS_Workspace/BUJIN/buzzer.c"
+   },
+   {
+      "directory" : "D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug",
+      "command"   : "clang++ -D__MSPM0G3507__ -D__USE_SYSCONFIG__ -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN\" -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug\" -I\"D:/TI_MSPM0/mspm0_sdk_2_10_00_04/source/third_party/CMSIS/Core/Include\" -I\"D:/TI_MSPM0/mspm0_sdk_2_10_00_04/source\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/armv7em-ti-none-eabihf/c++/v1\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/c++/v1\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/lib/clang/22/include\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/c\" -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug/syscfg\" -xc",
+      "file"      : "D:/TI_MSPM0/CCS_Workspace/BUJIN/delay.c"
+   },
+   {
+      "directory" : "D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug",
+      "command"   : "clang++ -D__MSPM0G3507__ -D__USE_SYSCONFIG__ -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN\" -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug\" -I\"D:/TI_MSPM0/mspm0_sdk_2_10_00_04/source/third_party/CMSIS/Core/Include\" -I\"D:/TI_MSPM0/mspm0_sdk_2_10_00_04/source\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/armv7em-ti-none-eabihf/c++/v1\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/c++/v1\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/lib/clang/22/include\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/c\" -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug/syscfg\" -xc",
+      "file"      : "D:/TI_MSPM0/CCS_Workspace/BUJIN/gray_sensor.c"
+   },
+   {
+      "directory" : "D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug",
+      "command"   : "clang++ -D__MSPM0G3507__ -D__USE_SYSCONFIG__ -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN\" -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug\" -I\"D:/TI_MSPM0/mspm0_sdk_2_10_00_04/source/third_party/CMSIS/Core/Include\" -I\"D:/TI_MSPM0/mspm0_sdk_2_10_00_04/source\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/armv7em-ti-none-eabihf/c++/v1\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/c++/v1\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/lib/clang/22/include\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/c\" -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug/syscfg\" -xc",
+      "file"      : "D:/TI_MSPM0/CCS_Workspace/BUJIN/ir_sensor.c"
+   },
+   {
+      "directory" : "D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug",
+      "command"   : "clang++ -D__MSPM0G3507__ -D__USE_SYSCONFIG__ -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN\" -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug\" -I\"D:/TI_MSPM0/mspm0_sdk_2_10_00_04/source/third_party/CMSIS/Core/Include\" -I\"D:/TI_MSPM0/mspm0_sdk_2_10_00_04/source\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/armv7em-ti-none-eabihf/c++/v1\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/c++/v1\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/lib/clang/22/include\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/c\" -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug/syscfg\" -xc",
+      "file"      : "D:/TI_MSPM0/CCS_Workspace/BUJIN/jy61p.c"
+   },
+   {
+      "directory" : "D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug",
+      "command"   : "clang++ -D__MSPM0G3507__ -D__USE_SYSCONFIG__ -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN\" -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug\" -I\"D:/TI_MSPM0/mspm0_sdk_2_10_00_04/source/third_party/CMSIS/Core/Include\" -I\"D:/TI_MSPM0/mspm0_sdk_2_10_00_04/source\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/armv7em-ti-none-eabihf/c++/v1\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/c++/v1\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/lib/clang/22/include\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/c\" -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug/syscfg\" -xc",
+      "file"      : "D:/TI_MSPM0/CCS_Workspace/BUJIN/main.c"
+   },
+   {
+      "directory" : "D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug",
+      "command"   : "clang++ -D__MSPM0G3507__ -D__USE_SYSCONFIG__ -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN\" -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug\" -I\"D:/TI_MSPM0/mspm0_sdk_2_10_00_04/source/third_party/CMSIS/Core/Include\" -I\"D:/TI_MSPM0/mspm0_sdk_2_10_00_04/source\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/armv7em-ti-none-eabihf/c++/v1\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/c++/v1\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/lib/clang/22/include\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/c\" -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug/syscfg\" -xc",
+      "file"      : "D:/TI_MSPM0/CCS_Workspace/BUJIN/motor.c"
+   },
+   {
+      "directory" : "D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug",
+      "command"   : "clang++ -D__MSPM0G3507__ -D__USE_SYSCONFIG__ -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN\" -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug\" -I\"D:/TI_MSPM0/mspm0_sdk_2_10_00_04/source/third_party/CMSIS/Core/Include\" -I\"D:/TI_MSPM0/mspm0_sdk_2_10_00_04/source\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/armv7em-ti-none-eabihf/c++/v1\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/c++/v1\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/lib/clang/22/include\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/c\" -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug/syscfg\" -xc",
+      "file"      : "D:/TI_MSPM0/CCS_Workspace/BUJIN/mpu6050.c"
+   },
+   {
+      "directory" : "D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug",
+      "command"   : "clang++ -D__MSPM0G3507__ -D__USE_SYSCONFIG__ -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN\" -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug\" -I\"D:/TI_MSPM0/mspm0_sdk_2_10_00_04/source/third_party/CMSIS/Core/Include\" -I\"D:/TI_MSPM0/mspm0_sdk_2_10_00_04/source\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/armv7em-ti-none-eabihf/c++/v1\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/c++/v1\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/lib/clang/22/include\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/c\" -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug/syscfg\" -xc",
+      "file"      : "D:/TI_MSPM0/CCS_Workspace/BUJIN/mpu6050_platform.c"
+   },
+   {
+      "directory" : "D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug",
+      "command"   : "clang++ -D__MSPM0G3507__ -D__USE_SYSCONFIG__ -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN\" -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug\" -I\"D:/TI_MSPM0/mspm0_sdk_2_10_00_04/source/third_party/CMSIS/Core/Include\" -I\"D:/TI_MSPM0/mspm0_sdk_2_10_00_04/source\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/armv7em-ti-none-eabihf/c++/v1\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/c++/v1\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/lib/clang/22/include\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/c\" -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug/syscfg\" -xc",
+      "file"      : "D:/TI_MSPM0/CCS_Workspace/BUJIN/oled.c"
+   },
+   {
+      "directory" : "D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug",
+      "command"   : "clang++ -D__MSPM0G3507__ -D__USE_SYSCONFIG__ -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN\" -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug\" -I\"D:/TI_MSPM0/mspm0_sdk_2_10_00_04/source/third_party/CMSIS/Core/Include\" -I\"D:/TI_MSPM0/mspm0_sdk_2_10_00_04/source\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/armv7em-ti-none-eabihf/c++/v1\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/c++/v1\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/lib/clang/22/include\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/c\" -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug/syscfg\" -xc",
+      "file"      : "D:/TI_MSPM0/CCS_Workspace/BUJIN/route_fsm.c"
+   },
+   {
+      "directory" : "D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug",
+      "command"   : "clang++ -D__MSPM0G3507__ -D__USE_SYSCONFIG__ -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN\" -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug\" -I\"D:/TI_MSPM0/mspm0_sdk_2_10_00_04/source/third_party/CMSIS/Core/Include\" -I\"D:/TI_MSPM0/mspm0_sdk_2_10_00_04/source\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/armv7em-ti-none-eabihf/c++/v1\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/c++/v1\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/lib/clang/22/include\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/c\" -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug/syscfg\" -xc",
+      "file"      : "D:/TI_MSPM0/CCS_Workspace/BUJIN/soft_i2c.c"
+   },
+   {
+      "directory" : "D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug",
+      "command"   : "clang++ -D__MSPM0G3507__ -D__USE_SYSCONFIG__ -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN\" -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug\" -I\"D:/TI_MSPM0/mspm0_sdk_2_10_00_04/source/third_party/CMSIS/Core/Include\" -I\"D:/TI_MSPM0/mspm0_sdk_2_10_00_04/source\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/armv7em-ti-none-eabihf/c++/v1\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/c++/v1\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/lib/clang/22/include\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/c\" -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug/syscfg\" -xc",
+      "file"      : "D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug/syscfg/ti_msp_dl_config.c"
+   },
+   {
+      "directory" : "D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug",
+      "command"   : "clang++ -D__MSPM0G3507__ -D__USE_SYSCONFIG__ -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN\" -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug\" -I\"D:/TI_MSPM0/mspm0_sdk_2_10_00_04/source/third_party/CMSIS/Core/Include\" -I\"D:/TI_MSPM0/mspm0_sdk_2_10_00_04/source\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/armv7em-ti-none-eabihf/c++/v1\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/c++/v1\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/lib/clang/22/include\" -isystem\"D:/TI_MSPM0/ccs/tools/compiler/ti-cgt-armllvm_5.1.1.LTS/include/c\" -I\"D:/TI_MSPM0/CCS_Workspace/BUJIN/Debug/syscfg\" -xc",
+      "file"      : "D:/TI_MSPM0/CCS_Workspace/BUJIN/key.c"
+   }
+]
