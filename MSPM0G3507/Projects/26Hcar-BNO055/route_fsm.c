@@ -7,6 +7,7 @@
 
 #include "route_fsm.h"
 #include "buzzer.h"
+#include "gray_sensor.h"
 #include "motor.h"
 
 /* ── 默认值 ── */
@@ -183,7 +184,7 @@ static uint32_t g_peak_ms;
 static float    g_peak_dist;
 
 /* ── 巡线内部状态 ── */
-static const int16_t WEIGHT[8] = { 200, 140, 75, 40, -40, -75, -140, -200 };
+#define LINE_CENTER 350
 static int16_t  g_last_steer;
 static int16_t  g_last_pos_ctrl;
 static uint32_t g_lost_cnt;
@@ -224,25 +225,16 @@ static void RecalcTimeWindows(void)
 /* ── 灰度巡线核心：只计算转向量，不输出电机 ── */
 static int16_t LineFollow_Calc(uint8_t raw)
 {
-    int8_t s[8];
-    for (uint8_t i = 0; i < 8; i++) s[i] = (raw >> i) & 1;
-
-    int16_t pos = 0;
-    for (uint8_t i = 0; i < 8; i++) pos += WEIGHT[i] * s[i];
-
+    int16_t pos = GraySensor_GetPosition(raw);
     int16_t lim  = g_OUTPUT_LIM;
     int16_t steer = 0;
 
-    bool has_line = (s[0] || s[1] || s[2] || s[3] ||
-                     s[4] || s[5] || s[6] || s[7]);
-    bool all_black = (raw == 0xFF);
-
-    if (has_line && !all_black) {
-        int16_t pos_ctrl = pos;
+    if (pos >= 0) {
+        int16_t pos_ctrl = pos - LINE_CENTER;
         if (pos_ctrl > -g_dead_zone && pos_ctrl < g_dead_zone) pos_ctrl = 0;
 
         int16_t d_pos = pos_ctrl - g_last_pos_ctrl;
-        steer = (int16_t)(-((float)pos_ctrl * g_KP + (float)d_pos * g_KD));
+        steer = (int16_t)((float)pos_ctrl * g_KP + (float)d_pos * g_KD);
         g_last_pos_ctrl = pos_ctrl;
         g_line_error = pos_ctrl;
 
@@ -414,35 +406,7 @@ bool Route_Update5ms(uint32_t now_ms, float yaw_deg, uint8_t gray_raw)
         /* 终点前降速 */
         if (elapsed >= g_slowdown_ms && g_finish_armed) {
             int16_t slow_base = (int16_t)((float)g_BASE_PWM * g_slow_ratio);
-            int8_t s[8];
-            for (uint8_t i = 0; i < 8; i++) s[i] = (gray_raw >> i) & 1;
-            int16_t pos = 0;
-            for (uint8_t i = 0; i < 8; i++) pos += WEIGHT[i] * s[i];
-            bool has_line = (s[0]||s[1]||s[2]||s[3]||s[4]||s[5]||s[6]||s[7]);
-            bool all_black = (gray_raw == 0xFF);
-            int16_t steer = 0;
-            if (has_line && !all_black) {
-                int16_t pos_ctrl = pos;
-                if (pos_ctrl > -g_dead_zone && pos_ctrl < g_dead_zone) pos_ctrl = 0;
-                int16_t d_pos = pos_ctrl - g_last_pos_ctrl;
-                steer = (int16_t)(-((float)pos_ctrl * g_KP + (float)d_pos * g_KD));
-                g_last_pos_ctrl = pos_ctrl;
-                g_line_error = pos_ctrl;
-                if (steer >  g_OUTPUT_LIM) steer =  g_OUTPUT_LIM;
-                if (steer < -g_OUTPUT_LIM) steer = -g_OUTPUT_LIM;
-                int16_t delta = steer - g_last_steer;
-                if (delta >  g_slew_step) steer = g_last_steer + g_slew_step;
-                if (delta < -g_slew_step) steer = g_last_steer - g_slew_step;
-                g_last_steer = steer;
-                g_lost_cnt = 0;
-            } else {
-                g_last_pos_ctrl = 0;
-                steer = g_last_steer;
-                g_line_error = 0;
-            }
-            g_line_steer = steer;
-            Motor_SetLeftSpeed(ClampPwm((int32_t)slow_base + steer + g_TRIM));
-            Motor_SetRightSpeed(ClampPwm((int32_t)slow_base - steer - g_TRIM));
+            LineFollow_UpdateBase(gray_raw, slow_base);
         } else {
             LineFollow_Update(gray_raw);
         }
