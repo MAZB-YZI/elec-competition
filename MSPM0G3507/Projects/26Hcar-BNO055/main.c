@@ -16,6 +16,67 @@
 #include "buzzer.h"
 #include "route_fsm.h"
 
+/* ========== 按键 ========== */
+#define BTN_COUNT       4
+#define BTN_DEBOUNCE    3       /* 30ms 消抖 */
+#define BTN_K1          0       /* PB1  - 上一题 */
+#define BTN_K2          1       /* PB10 - 下一题 */
+#define BTN_K3          2       /* PB11 - START */
+#define BTN_K4          3       /* PB14 - STOP */
+
+static const struct { GPIO_Regs *port; uint32_t pin; uint32_t iomux; } g_btn[BTN_COUNT] = {
+    { GPIOB, DL_GPIO_PIN_1,  IOMUX_PINCM13 },
+    { GPIOB, DL_GPIO_PIN_10, IOMUX_PINCM27 },
+    { GPIOB, DL_GPIO_PIN_11, IOMUX_PINCM28 },
+    { GPIOB, DL_GPIO_PIN_14, IOMUX_PINCM31 },
+};
+static uint8_t g_btn_deb[BTN_COUNT];
+static bool    g_btn_pressed[BTN_COUNT];
+static bool    g_btn_event[BTN_COUNT];
+
+static void Buttons_Init(void)
+{
+    for (uint8_t i = 0; i < BTN_COUNT; i++) {
+        /* 1. 关闭输出使能 */
+        DL_GPIO_disableOutput(g_btn[i].port, g_btn[i].pin);
+        /* 2. 配置引脚复用为 GPIO 输入上拉 */
+        DL_GPIO_initDigitalInputFeatures(
+            g_btn[i].iomux, DL_GPIO_INVERSION_DISABLE,
+            DL_GPIO_RESISTOR_PULL_UP, DL_GPIO_HYSTERESIS_DISABLE,
+            DL_GPIO_WAKEUP_DISABLE);
+        /* 3. 清除输出使能位（确保为输入） */
+        g_btn[i].port->DOECLR31_0 = g_btn[i].pin;
+        g_btn_deb[i] = 0;
+        g_btn_pressed[i] = false;
+        g_btn_event[i] = false;
+    }
+}
+
+static void Buttons_Scan(void)
+{
+    for (uint8_t i = 0; i < BTN_COUNT; i++) {
+        bool raw_low = !DL_GPIO_readPins(g_btn[i].port, g_btn[i].pin);
+        if (raw_low) {
+            if (g_btn_deb[i] < BTN_DEBOUNCE) g_btn_deb[i]++;
+            if (g_btn_deb[i] >= BTN_DEBOUNCE && !g_btn_pressed[i]) {
+                g_btn_pressed[i] = true;
+                g_btn_event[i] = true;
+            }
+        } else {
+            g_btn_deb[i] = 0;
+            g_btn_pressed[i] = false;
+        }
+    }
+}
+
+static bool Button_IsPressed(uint8_t btn)
+{
+    if (btn >= BTN_COUNT) return false;
+    bool e = g_btn_event[btn];
+    g_btn_event[btn] = false;
+    return e;
+}
+
 /* ========== 常量 ========== */
 #define LEFT_ENCODER_DIR   1      /* 左轮编码器方向系数 */
 #define RIGHT_ENCODER_DIR -1     /* 右轮编码器方向系数，右轮安装反向 */
@@ -33,7 +94,18 @@ static volatile int16_t g_speed_l, g_speed_r; /* 编码器速度 脉冲/秒 */
 static float      g_total_angle;              /* 全局累计角度 */
 static float      g_last_yaw_for_total;       /* 上次yaw，用于全局累计 */
 static uint32_t   last_oled_ms;               /* 上次 OLED 刷新时间 */
+static uint32_t   last_btn_ms;               /* 上次按键扫描时间 */
 static DL_SYSCTL_RESET_CAUSE g_reset_cause;   /* 启动后立即保存，避免复位原因丢失 */
+
+/* 题目选择 */
+static const RouteMode_t g_question_modes[] = {
+    ROUTE_MODE_H_LAP,       /* Q2 */
+    ROUTE_MODE_H_LAP,       /* Q3 (小车不动，通知相机) */
+    ROUTE_MODE_Q4_AB,       /* Q4 */
+    ROUTE_MODE_Q5_LAP,      /* Q5 */
+};
+#define QUESTION_COUNT 4
+static uint8_t g_current_question = 0;  /* 0=Q2, 1=Q3, 2=Q4, 3=Q5 */
 
 /* ================================================================
  *  辅助
@@ -155,6 +227,7 @@ int main(void)
     last_oled_ms = 0;
     BT_Init();
     BT_SetTickPtr(&g_ms_ticks);
+    Buttons_Init();
 
     OLED_ShowBootStatus("JY61P INIT...");
     JY61P_Init();
@@ -192,6 +265,7 @@ int main(void)
 
     uint32_t last_bno_ms = g_ms_ticks;
     uint32_t last_tel_ms = g_ms_ticks;
+    last_btn_ms = g_ms_ticks;
 
     while (1) {
         uint32_t now = g_ms_ticks;
@@ -205,6 +279,40 @@ int main(void)
 
         /* 蓝牙命令处理 */
         BT_Poll();
+
+        /* 按键扫描（每 10ms） */
+        if ((now - last_btn_ms) >= 10U) {
+            last_btn_ms = now;
+            Buttons_Scan();
+
+            /* K4 = STOP（任何状态有效） */
+            if (Button_IsPressed(BTN_K4)) {
+                g_route_stop_request = true;
+            }
+
+            /* K3 = START（仅待机状态有效） */
+            if (Button_IsPressed(BTN_K3)) {
+                if (!Route_IsActive()) {
+                    Route_SetMode(g_question_modes[g_current_question]);
+                    g_route_start_request = true;
+                }
+            }
+
+            /* K1 = 上一题（仅待机状态） */
+            if (Button_IsPressed(BTN_K1)) {
+                if (!Route_IsActive()) {
+                    if (g_current_question > 0) g_current_question--;
+                    else g_current_question = QUESTION_COUNT - 1;
+                }
+            }
+
+            /* K2 = 下一题（仅待机状态） */
+            if (Button_IsPressed(BTN_K2)) {
+                if (!Route_IsActive()) {
+                    g_current_question = (g_current_question + 1) % QUESTION_COUNT;
+                }
+            }
+        }
 
         /* 遥测输出 */
         if (BT_GetTelPeriod() > 0 && (now - last_tel_ms) >= BT_GetTelPeriod()) {
@@ -234,15 +342,15 @@ int main(void)
             OLED_ShowString(50, 13, "S", 12);
             OLED_ShowSigned4(58, 13, Route_GetLineSteer());
 
-            /* 行2 y=26: 运行时间 + 模式 */
+            /* 行2 y=26: 时间 + 题目 */
             OLED_ShowString(0, 26, "T", 12);
             uint32_t sec_x100 = Route_GetElapsedMs() / 10U;
             OLED_ShowNum(8, 26, sec_x100 / 100, 2, 12);
             OLED_ShowString(20, 26, ".", 12);
             OLED_ShowNum(26, 26, sec_x100 % 100, 2, 12);
             OLED_ShowString(44, 26, "s", 12);
-            OLED_ShowString(56, 26, "M", 12);
-            OLED_ShowNum(64, 26, (uint32_t)mode, 1, 12);
+            OLED_ShowString(56, 26, "Q", 12);
+            OLED_ShowNum(64, 26, g_current_question + 2, 1, 12);
 
             /* 行3 y=39: 编码器速度 */
             OLED_ShowString(0, 39, "L", 12);
@@ -250,15 +358,15 @@ int main(void)
             OLED_ShowString(56, 39, "R", 12);
             OLED_ShowSigned4(64, 39, g_speed_r);
 
-            /* 行4 y=52: 航向/结束原因 */
+            /* 行4 y=52: 航向/结束原因 + 重启原因 */
             if (Route_IsFinished()) {
                 OLED_ShowString(0, 52, Route_GetFinishReasonStr(), 12);
-                OLED_ShowString(64, 52, g_gyro_ok ? "OK" : "ER", 12);
+                OLED_ShowString(64, 52, ResetCauseName(g_reset_cause), 12);
             } else {
                 OLED_ShowString(0, 52, "Y", 12);
                 int32_t yaw_int = (int32_t)(g_yaw * 10);
                 OLED_ShowSigned4(8, 52, yaw_int / 10);
-                OLED_ShowString(64, 52, g_gyro_ok ? "J61" : "ERR", 12);
+                OLED_ShowString(64, 52, ResetCauseName(g_reset_cause), 12);
             }
 
             OLED_Refresh();

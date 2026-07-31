@@ -116,18 +116,20 @@ void BT_SendParams(void)
               Route_GetFallbackAheadMs() / 1000.0f,
               Route_GetTimeoutMs() / 1000.0f);
 
-    BT_Printf("Q4  PWM=%d RAMP=%u ARM=%.0f B=%.0f YAW=%.1f POST=%.0f STOP=%u AB=%u\r\n",
+    BT_Printf("Q4  PWM=%d RAMP=%u ARM=%.0f B=%.0f HKP=%.2f HLIM=%d AB=%.2f\r\n",
               Route_GetQ4Pwm(), Route_GetQ4RampMs(),
               Route_GetQ4ArmCm(), Route_GetQ4BCm(),
-              Route_GetQ4YawDeg(), Route_GetQ4PostCm(),
-              Route_GetQ4StopMs(), Route_GetQ4AbTimeMs());
+              Route_GetQ4Hkp(), Route_GetQ4Hlim(),
+              Route_GetQ4AbTimeMs() / 1000.0f);
 
-    BT_Printf("Q5  RAMP=%u OFF=%.1f POST=%.0f STOP=%u TO=%.1f PASS=%d LAP=%u\r\n",
-              Route_GetQ5RampMs(), Route_GetQ5OffsetCm(),
+    BT_Printf("Q5  PWM=%d RAMP=%u OFF=%.1f POST=%.0f STOP=%u TO=%.1f TMIN=%.1f TMAX=%.1f PASS=%d LAP=%.2f\r\n",
+              Route_GetQ5Pwm(), Route_GetQ5RampMs(), Route_GetQ5OffsetCm(),
               Route_GetQ5PostCm(), Route_GetQ5StopMs(),
               Route_GetQ5TimeoutMs() / 1000.0f,
+              Route_GetQ5DetectMinMs() / 1000.0f,
+              Route_GetQ5DetectMaxMs() / 1000.0f,
               Route_GetQ5PassedA() ? 1 : 0,
-              Route_GetQ5LapTimeMs());
+              Route_GetQ5LapTimeMs() / 1000.0f);
 
     if (Route_IsFinished()) {
         BT_Printf("RESULT=%s T=%.2f D=%.1f\r\n",
@@ -153,8 +155,8 @@ static void BT_SendHelp(void)
     BT_Send("LINE: KP KD BASE LIM TRIM DZ SLEW\r\n");
     BT_Send("STOP: FMIN FMAX BTH FCNT BRAKE LOST SC\r\n");
     BT_Send("TIME: LAP TW SLOWR SLOWA FBA TOUT\r\n");
-    BT_Send("Q4  : Q4PWM Q4RAMP Q4ARM Q4B Q4YAW Q4POST Q4STOP\r\n");
-    BT_Send("Q5  : Q5RAMP Q5OFFSET Q5POST Q5STOP Q5TOUT\r\n");
+    BT_Send("Q4  : Q4PWM Q4RAMP Q4ARM Q4B Q4HKP Q4HLIM\r\n");
+    BT_Send("Q5  : Q5PWM Q5RAMP Q5OFFSET Q5POST Q5STOP Q5TOUT Q5TMIN Q5TMAX\r\n");
     BT_Send("CTRL: MODE START STOP SHOW HELP ZERO\r\n");
     BT_Send("TEL : TEL 100 / TEL 0\r\n");
 }
@@ -278,17 +280,17 @@ static void parse_cmd(const char *cmd)
     if (sscanf(cmd, "Q4B %f", &val) == 1) {
         Route_SetQ4BCm(val); BT_Printf("OK Q4B=%.0f\r\n", Route_GetQ4BCm()); return;
     }
-    if (sscanf(cmd, "Q4YAW %f", &val) == 1) {
-        Route_SetQ4YawDeg(val); BT_Printf("OK Q4YAW=%.1f\r\n", Route_GetQ4YawDeg()); return;
+    if (sscanf(cmd, "Q4HKP %f", &val) == 1) {
+        Route_SetQ4Hkp(val); BT_Printf("OK Q4HKP=%.2f\r\n", Route_GetQ4Hkp()); return;
     }
-    if (sscanf(cmd, "Q4POST %f", &val) == 1) {
-        Route_SetQ4PostCm(val); BT_Printf("OK Q4POST=%.0f\r\n", Route_GetQ4PostCm()); return;
-    }
-    if (sscanf(cmd, "Q4STOP %d", &ival) == 1) {
-        Route_SetQ4StopMs((uint16_t)ival); BT_Printf("OK Q4STOP=%u\r\n", Route_GetQ4StopMs()); return;
+    if (sscanf(cmd, "Q4HLIM %d", &ival) == 1) {
+        Route_SetQ4Hlim((int16_t)ival); BT_Printf("OK Q4HLIM=%d\r\n", Route_GetQ4Hlim()); return;
     }
 
     /* Q5 参数 */
+    if (sscanf(cmd, "Q5PWM %d", &ival) == 1) {
+        Route_SetQ5Pwm((int16_t)ival); BT_Printf("OK Q5PWM=%d\r\n", Route_GetQ5Pwm()); return;
+    }
     if (sscanf(cmd, "Q5RAMP %d", &ival) == 1) {
         Route_SetQ5RampMs((uint16_t)ival); BT_Printf("OK Q5RAMP=%u\r\n", Route_GetQ5RampMs()); return;
     }
@@ -303,6 +305,12 @@ static void parse_cmd(const char *cmd)
     }
     if (sscanf(cmd, "Q5TOUT %f", &val) == 1) {
         Route_SetQ5TimeoutMs((uint32_t)(val * 1000.0f)); BT_Printf("OK Q5TOUT=%.1f\r\n", Route_GetQ5TimeoutMs()/1000.0f); return;
+    }
+    if (sscanf(cmd, "Q5TMIN %f", &val) == 1) {
+        Route_SetQ5DetectMinMs((uint32_t)(val * 1000.0f)); BT_Printf("OK Q5TMIN=%.1f\r\n", Route_GetQ5DetectMinMs()/1000.0f); return;
+    }
+    if (sscanf(cmd, "Q5TMAX %f", &val) == 1) {
+        Route_SetQ5DetectMaxMs((uint32_t)(val * 1000.0f)); BT_Printf("OK Q5TMAX=%.1f\r\n", Route_GetQ5DetectMaxMs()/1000.0f); return;
     }
 
     /* 遥测 */
