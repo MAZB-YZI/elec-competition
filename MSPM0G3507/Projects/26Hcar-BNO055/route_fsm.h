@@ -6,11 +6,13 @@
 
 /* ── 运行模式 ── */
 typedef enum {
-    ROUTE_MODE_STOP       = 0,  /* 停车 */
-    ROUTE_MODE_LINE_TEST  = 1,  /* 连续巡线，不自动停车 */
-    ROUTE_MODE_H_LAP      = 2,  /* H题：绕一圈并在A点停车 */
-    ROUTE_MODE_FINISH_TEST = 3, /* 只测试A点横线识别 */
-    ROUTE_MODE_STRAIGHT   = 4   /* 直走测试，矫正左右轮差速 */
+    ROUTE_MODE_STRAIGHT   = 0,  /* 直走校准 */
+    ROUTE_MODE_LINE_TEST  = 1,  /* 连续巡线 */
+    ROUTE_MODE_H_LAP      = 2,  /* 第二问：一圈停车 */
+    ROUTE_MODE_FINISH_TEST = 3, /* A线测试 */
+    ROUTE_MODE_Q4_AB      = 4,  /* 第四问：A→B */
+    ROUTE_MODE_Q5_LAP     = 5,  /* 第五问：一圈通过A */
+    ROUTE_MODE_CALIBRATE  = 6   /* 编码器里程标定 */
 } RouteMode_t;
 
 /* ── 结束原因 ── */
@@ -32,31 +34,51 @@ bool Route_Update5ms(uint32_t now_ms, float yaw_deg, uint8_t gray_raw);
 void Route_SetMode(RouteMode_t mode);
 RouteMode_t Route_GetMode(void);
 
-/* ── 灰度巡线参数 ── */
-void  Route_SetBasePwm(int16_t pwm);
+/* ── 巡线参数 ── */
 void  Route_SetKp(float kp);
 void  Route_SetKd(float kd);
+void  Route_SetBasePwm(int16_t pwm);
 void  Route_SetOutputLim(int16_t lim);
-int16_t Route_GetBasePwm(void);
+void  Route_SetTrim(int16_t trim);
+void  Route_SetDeadZone(int16_t dz);
+void  Route_SetSlewStep(int16_t step);
 float Route_GetKp(void);
 float Route_GetKd(void);
+int16_t Route_GetBasePwm(void);
 int16_t Route_GetOutputLim(void);
-void  Route_SetTrim(int16_t trim);
 int16_t Route_GetTrim(void);
+int16_t Route_GetDeadZone(void);
+int16_t Route_GetSlewStep(void);
 
-/* ── 终点检测参数 ── */
-void Route_SetFinishMinDist(float cm);
-void Route_SetFinishMaxDist(float cm);
-void Route_SetFinishConfirmTicks(uint8_t ticks);
-void Route_SetBrakeDurationMs(uint16_t ms);
-uint16_t Route_GetBrakeDurationMs(void);
-uint8_t  Route_GetFinishConfirmTicks(void);
-void Route_SetTimeoutMs(uint32_t ms);
-uint32_t Route_GetTimeoutMs(void);
-void Route_SetLapTargetMs(uint32_t ms);
-uint32_t Route_GetLapTargetMs(void);
+/* ── 停车参数 ── */
+void  Route_SetFinishMinDist(float cm);
+void  Route_SetFinishMaxDist(float cm);
+void  Route_SetBlackMin(uint8_t val);
+void  Route_SetFinishConfirmTicks(uint8_t ticks);
+void  Route_SetBrakeDurationMs(uint16_t ms);
+void  Route_SetLostMs(uint16_t ms);
+void  Route_SetStartClearCm(float cm);
 float Route_GetFinishMinDist(void);
 float Route_GetFinishMaxDist(void);
+uint8_t  Route_GetBlackMin(void);
+uint8_t  Route_GetFinishConfirmTicks(void);
+uint16_t Route_GetBrakeDurationMs(void);
+uint16_t Route_GetLostMs(void);
+float    Route_GetStartClearCm(void);
+
+/* ── 时间参数 ── */
+void     Route_SetLapTargetMs(uint32_t ms);
+void     Route_SetTimeWindowMs(uint32_t ms);
+void     Route_SetSlowRatio(float ratio);
+void     Route_SetSlowAheadMs(uint32_t ms);
+void     Route_SetFallbackAheadMs(uint32_t ms);
+void     Route_SetTimeoutMs(uint32_t ms);
+uint32_t Route_GetLapTargetMs(void);
+uint32_t Route_GetTimeWindowMs(void);
+float    Route_GetSlowRatio(void);
+uint32_t Route_GetSlowAheadMs(void);
+uint32_t Route_GetFallbackAheadMs(void);
+uint32_t Route_GetTimeoutMs(void);
 
 /* ── 运行状态查询 ── */
 bool     Route_IsActive(void);
@@ -66,14 +88,51 @@ float    Route_GetDistanceCm(void);
 RouteFinishReason_t Route_GetFinishReason(void);
 const char *Route_GetStateName(void);
 const char *Route_GetFinishReasonStr(void);
-int16_t  Route_GetLineError(void);   /* 实际巡线位置误差，中心=0 */
-int16_t  Route_GetLineSteer(void);   /* 实际巡线转向量 */
-uint8_t  Route_GetPeakBc(void);      /* 终点窗口内峰值黑色通道数 */
-uint8_t  Route_GetPeakRaw(void);     /* 终点窗口内峰值 raw 值 */
-uint32_t Route_GetPeakMs(void);      /* 峰值出现时间 */
-float    Route_GetPeakDist(void);    /* 峰值出现距离 */
+int16_t  Route_GetLineError(void);
+int16_t  Route_GetLineSteer(void);
 
-/* ── 蓝牙 START/STOP 请求 (主循环写, ISR 读) ── */
+/* ── PEAK 记录 ── */
+uint8_t  Route_GetPeakBc(void);
+uint8_t  Route_GetPeakRaw(void);
+uint32_t Route_GetPeakMs(void);
+float    Route_GetPeakDist(void);
+
+/* ── Q4 参数 ── */
+void  Route_SetQ4Pwm(int16_t v);
+void  Route_SetQ4RampMs(uint16_t v);
+void  Route_SetQ4ArmCm(float v);
+void  Route_SetQ4BCm(float v);
+void  Route_SetQ4Hkp(float v);
+void  Route_SetQ4Hlim(int16_t v);
+int16_t  Route_GetQ4Pwm(void);
+uint16_t Route_GetQ4RampMs(void);
+float    Route_GetQ4ArmCm(void);
+float    Route_GetQ4BCm(void);
+float    Route_GetQ4Hkp(void);
+int16_t  Route_GetQ4Hlim(void);
+uint32_t Route_GetQ4AbTimeMs(void);
+
+/* ── Q5 参数 ── */
+void  Route_SetQ5Pwm(int16_t v);
+void  Route_SetQ5RampMs(uint16_t v);
+void  Route_SetQ5OffsetCm(float v);
+void  Route_SetQ5PostCm(float v);
+void  Route_SetQ5StopMs(uint16_t v);
+void  Route_SetQ5TimeoutMs(uint32_t v);
+void  Route_SetQ5DetectMinMs(uint32_t v);
+void  Route_SetQ5DetectMaxMs(uint32_t v);
+int16_t  Route_GetQ5Pwm(void);
+uint16_t Route_GetQ5RampMs(void);
+float    Route_GetQ5OffsetCm(void);
+float    Route_GetQ5PostCm(void);
+uint16_t Route_GetQ5StopMs(void);
+uint32_t Route_GetQ5TimeoutMs(void);
+uint32_t Route_GetQ5DetectMinMs(void);
+uint32_t Route_GetQ5DetectMaxMs(void);
+uint32_t Route_GetQ5LapTimeMs(void);
+bool     Route_GetQ5PassedA(void);
+
+/* ── 蓝牙 START/STOP 请求 ── */
 extern volatile bool g_route_start_request;
 extern volatile bool g_route_stop_request;
 
