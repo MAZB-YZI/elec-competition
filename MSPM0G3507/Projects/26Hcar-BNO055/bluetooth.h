@@ -5,20 +5,14 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-typedef struct {
-    float   KP;
-    float   KI;
-    int16_t BASE_PWM;
-    int16_t TURN_SPEED;
-    int16_t OUTPUT_LIM;
-} TuningParams_t;
-
 void BT_Init(void);
 void BT_SetTickPtr(volatile uint32_t *tick_ptr);
-bool BT_Poll(TuningParams_t *params);
+bool BT_Poll(void);
 void BT_Send(const char *str);
 void BT_Printf(const char *fmt, ...);
-void BT_SendParams(const TuningParams_t *p);
+void BT_SendParams(void);
+void BT_Telemetry(uint8_t gray_raw, int16_t speed_l, int16_t speed_r, float yaw);
+uint16_t BT_GetTelPeriod(void);
 
 void UART_PB_INST_IRQHandler(void);
 
