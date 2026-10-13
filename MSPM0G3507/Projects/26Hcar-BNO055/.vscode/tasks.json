@@ -1,0 +1,35 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "CCS 全量编译",
+            "type": "shell",
+            "command": "D:/TI/CCS/ccs/utils/bin/gmake.exe",
+            "args": [
+                "-C",
+                "${workspaceFolder}/Debug",
+                "all"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": ["$gcc"],
+            "detail": "使用 CCS gmake 编译整个项目（等价于 CCS 里的 Build）"
+        },
+        {
+            "label": "CCS 清理并重新编译",
+            "type": "shell",
+            "command": "D:/TI/CCS/ccs/utils/bin/gmake.exe",
+            "args": [
+                "-C",
+                "${workspaceFolder}/Debug",
+                "clean",
+                "all"
+            ],
+            "group": "build",
+            "problemMatcher": ["$gcc"],
+            "detail": "清理后全量重新编译"
+        }
+    ]
+}
