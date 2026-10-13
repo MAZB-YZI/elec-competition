@@ -17,12 +17,23 @@
 
 static char rx_buf[RX_BUF_SIZE];
 static volatile uint8_t rx_idx;
-static volatile bool rx_ready;
 static volatile uint32_t rx_last_ms;
 static volatile uint32_t *bt_tick;
 
 static char last_cmd[RX_BUF_SIZE];
 static uint32_t last_cmd_ms;
+
+/* P0: 双缓冲 —— 解析专用缓冲区，主循环独占，ISR 不碰 */
+static char parse_buf[RX_BUF_SIZE];
+
+/* P1: 命令队列 —— 4 深度环形缓冲区，ISR 入队，主循环出队 */
+#define CMD_QUEUE_DEPTH 4U
+static char cmd_queue[CMD_QUEUE_DEPTH][RX_BUF_SIZE];
+static volatile uint8_t q_head = 0U;   /* 队头：主循环出队位置 */
+static volatile uint8_t q_tail = 0U;   /* 队尾：ISR 入队位置 */
+
+/* P2: 溢出标志 —— 命令超长 或 队列满时由 ISR 置位 */
+static volatile bool rx_overflow = false;
 
 /* 遥测 */
 static volatile uint16_t g_tel_period_ms = 0;
@@ -41,13 +52,25 @@ void UART_PB_INST_IRQHandler(void)
             uint8_t ch = DL_UART_Main_receiveDataBlocking(UART_PB_INST);
             if (bt_tick != NULL) rx_last_ms = *bt_tick;
             if ((ch == '\n') || (ch == '\r')) {
-                if (rx_idx > 0U) { rx_buf[rx_idx] = '\0'; rx_ready = true; }
+                if (rx_idx > 0U) {
+                    rx_buf[rx_idx] = '\0';
+                    /* P1: 入队而非设 rx_ready */
+                    uint8_t next = (uint8_t)((q_tail + 1U) % CMD_QUEUE_DEPTH);
+                    if (next != q_head) {                /* 队列未满 */
+                        strncpy(cmd_queue[q_tail], rx_buf, RX_BUF_SIZE - 1U);
+                        cmd_queue[q_tail][RX_BUF_SIZE - 1U] = '\0';
+                        q_tail = next;
+                    } else {
+                        rx_overflow = true;              /* P2: 队列满，丢弃 */
+                    }
+                }
                 rx_idx = 0U;
             } else {
                 rx_buf[rx_idx++] = (char)ch;
             }
         } else {
             rx_idx = 0U;
+            rx_overflow = true;                          /* P2: 命令超长，丢弃 */
         }
         break;
     default: break;
@@ -56,8 +79,9 @@ void UART_PB_INST_IRQHandler(void)
 
 void BT_Init(void)
 {
-    rx_idx = 0U; rx_ready = false; rx_last_ms = 0U; bt_tick = NULL;
+    rx_idx = 0U; rx_last_ms = 0U; bt_tick = NULL;
     memset(last_cmd, 0, sizeof(last_cmd)); last_cmd_ms = 0U;
+    q_head = 0U; q_tail = 0U; rx_overflow = false;
     g_tel_period_ms = 0;
 
     for (uint8_t i = 0; i < 16U; i++) {
@@ -342,29 +366,46 @@ uint16_t BT_GetTelPeriod(void) { return g_tel_period_ms; }
 /* ── 主循环调用 ── */
 bool BT_Poll(void)
 {
-    /* 超时成帧 */
-    if ((rx_ready == false) && (rx_idx > 0U) && (bt_tick != NULL) &&
+    /* P2: 溢出提示 */
+    if (rx_overflow) {
+        rx_overflow = false;
+        BT_Send("ERR: OVERFLOW\r\n");
+    }
+
+    /* 超时成帧 —— 超时命令也入队 */
+    if ((rx_idx > 0U) && (bt_tick != NULL) &&
         ((*bt_tick - rx_last_ms) > RX_TIMEOUT_MS)) {
         rx_buf[rx_idx] = '\0';
-        rx_ready = true;
+        uint8_t next = (uint8_t)((q_tail + 1U) % CMD_QUEUE_DEPTH);
+        if (next != q_head) {
+            strncpy(cmd_queue[q_tail], rx_buf, RX_BUF_SIZE - 1U);
+            cmd_queue[q_tail][RX_BUF_SIZE - 1U] = '\0';
+            q_tail = next;
+        } else {
+            rx_overflow = true;
+        }
         rx_idx = 0U;
     }
 
-    if (rx_ready) {
-        rx_ready = false;
-        trim_cmd(rx_buf);
-        if (rx_buf[0] == '\0') return false;
+    /* P1: 从队列取一条命令 */
+    if (q_head != q_tail) {
+        /* P0: 拷贝到 parse_buf，主循环独占，ISR 不碰 */
+        memcpy(parse_buf, cmd_queue[q_head], RX_BUF_SIZE);
+        q_head = (uint8_t)((q_head + 1U) % CMD_QUEUE_DEPTH);
+
+        trim_cmd(parse_buf);
+        if (parse_buf[0] == '\0') return false;
 
         /* 防回显重复 */
-        if (bt_tick != NULL && strcmp(rx_buf, last_cmd) == 0 &&
+        if (bt_tick != NULL && strcmp(parse_buf, last_cmd) == 0 &&
             (*bt_tick - last_cmd_ms) < 100U) {
             return false;
         }
-        strncpy(last_cmd, rx_buf, RX_BUF_SIZE - 1);
+        strncpy(last_cmd, parse_buf, RX_BUF_SIZE - 1);
         last_cmd[RX_BUF_SIZE - 1] = '\0';
         if (bt_tick != NULL) last_cmd_ms = *bt_tick;
 
-        parse_cmd(rx_buf);
+        parse_cmd(parse_buf);              /* P0: 安全！用的是 parse_buf */
     }
     return false;
 }
